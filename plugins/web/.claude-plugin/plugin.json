@@ -1,0 +1,6 @@
+{
+  "name": "claude-web",
+  "version": "0.1.0",
+  "description": "Serve the claude-web chat UI (Elysia API + static web on a single port) from Claude Code",
+  "author": "local"
+}
