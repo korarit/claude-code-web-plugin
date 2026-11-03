@@ -1,0 +1,20 @@
+{
+  "name": "@repo/api",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@repo/contracts": "workspace:*",
+    "@repo/core": "workspace:*",
+    "elysia": "latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}

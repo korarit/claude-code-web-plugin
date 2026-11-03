@@ -9,11 +9,12 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "allowImportingTsExtensions": true,
     "declaration": true,
     "sourceMap": false,
     "paths": {
-      "@core/*": ["packages/core/src/*"],
-      "@contracts/*": ["packages/contracts/src/*"]
+      "@core/*": ["./packages/core/src/*"],
+      "@contracts/*": ["./packages/contracts/src/*"]
     }
   }
 }
