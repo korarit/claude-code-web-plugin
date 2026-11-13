@@ -37,9 +37,15 @@
 
 ### 3.1 `packages/contracts/src/chat.ts`
 - เพิ่ม `SessionStatus = "idle" | "running" | "waiting_permission" | "stopped"`
+- เพิ่ม `SessionOrigin = "web" | "cli" | "tmux" | "ide" | "opencode_server"` (บอกว่า session นี้เริ่มเปิดจากที่ไหน)
+- เพิ่ม `SessionControlMode = "interactive" | "mirror"` (`interactive` = เว็บสั่งพิมพ์ต่อได้ตรง, `mirror` = ดูสด/auto-save จากภายนอกพร้อมปุ่ม `Continue in Web`)
 - ขยาย `SessionInfo`:
   - `title?: string` (ชื่อที่ผู้ใช้ตั้งเอง; fallback เป็น preview ข้อความแรก)
   - `status: SessionStatus`
+  - `origin: SessionOrigin` (default `"web"` เมื่อสร้างจาก Web UI)
+  - `controlMode: SessionControlMode`
+  - `externalSessionId?: string` (ID เดิมของ CLI/IDE เพื่อกัน detect ซ้ำ)
+  - `discoveredAt?: string`
   - `tmuxSession?: string`
   - `transcriptPath?: string`
   - `cwd?: string`
@@ -51,7 +57,7 @@
 ### 3.2 `apps/api/src/modules/chat/domain/`
 - `session.entity.ts`: เพิ่ม state transition methods (`markRunning()`, `markIdle()`, `markWaitingPermission()`, `attachTranscript(path)`, `rename(title)`, `archive()`, `unarchive()`)
 - `chat.events.ts`: เพิ่ม `DomainStatusEvent`, `DomainHookEvent`
-- `repository.port.ts`: เพิ่ม `findByTmuxSession(name)`, `findByTranscriptPath(path)`, `delete(id)`
+- `repository.port.ts`: เพิ่ม `findByTmuxSession(name)`, `findByTranscriptPath(path)`, `findByExternalSessionId(externalId)`, `list(filters?)` (`archived`, `origin`, `harnessId`, `cwd`, `q`), `delete(id)`
 - `errors.ts`: เพิ่ม `TmuxNotAvailableError`, `SessionNotRunningError`
 
 ### 3.3 `apps/api/src/modules/chat/application/`
@@ -69,7 +75,7 @@
   - Bind เฉพาะ `127.0.0.1` เป็นค่าเริ่มต้น (ห้ามเปิด `0.0.0.0` โดยไม่มี auth เพื่อป้องกัน remote RCE ผ่าน `tmux send-keys`)
   - สร้าง runtime lock/discovery file `~/.harness-web/runtime.json` (`{ port, pid, token }`) ตอน startup และลบตอน graceful shutdown; ตรวจ local token / origin สำหรับ endpoints สำคัญ
 - `session.repository.ts`:
-  - เปลี่ยนจาก In-Memory ล้วนเป็น **Lightweight Persistent Store** (`~/.harness-web/sessions.json` + in-memory cache) เก็บ `{ id, tmuxSession, transcriptPath, cwd, model, status }` เพื่อให้ restart `apps/api` แล้วกลับมาเฝ้าต่อได้จริง
+  - เปลี่ยนจาก In-Memory ล้วนเป็น **Lightweight Persistent Store** (`~/.harness-web/sessions.json` + in-memory cache) เก็บ `{ id, origin, controlMode, externalSessionId, discoveredAt, tmuxSession, transcriptPath, cwd, model, status }` เพื่อให้ restart `apps/api` แล้วกลับมาเฝ้าต่อได้จริง และกัน duplicate ตอน auto-detect external sessions (Phase 2)
 - `tmux-runner.ts`:
   - ตั้งชื่อ session deterministic เช่น `cw-<shortId>`
   - สร้าง session ด้วย `tmux new-session -d -s <name> -c <cwd> -e CLAUDE_WEB_SESSION_ID=<id> -e CLAUDE_WEB_PORT=<port> -e CLAUDE_WEB_TOKEN=<token> "claude --session-id <uuid> --model <m>"` (รู้ `.jsonl` path ทันที + ผูก session ตั้งแต่ hook แรก)
@@ -88,7 +94,7 @@
 - `PATCH /api/chat/sessions/:id` → rename (`title`) หรือ archive / unarchive (`archived: boolean`, ถ้า archive ให้หยุด/detach หรือคงประวัติไว้เปิดดูได้)
 - `POST /api/chat/sessions/:id/abort` → ส่ง `Ctrl+C` หยุดงานที่กำลังรันอยู่กลางคัน
 - `DELETE /api/chat/sessions/:id` → **ลบถาวร**: kill `tmux` session (ถ้ายังรันอยู่), ลบออกจาก `~/.harness-web/sessions.json` และลบ cache/snapshots ของ session นั้นออกทั้งหมด
-- `GET /api/chat/sessions?archived=false|true|all` → list sessions พร้อม `status` ล่าสุด (`idle` / `running` / `waiting_permission` / `stopped`)
+- `GET /api/chat/sessions?archived=false|true|all&origin=...&harness=...&cwd=...&q=...` → list sessions พร้อม `status` ล่าสุด (`idle` / `running` / `waiting_permission` / `stopped`) และรองรับ filter ตามต้นทาง/โปรเจกต์
 - `GET /api/chat/sessions/events` → global SSE stream สำหรับ Session Sidebar (อัปเดตสถานะ `running` / `idle` / `waiting_permission` รวมถึง event rename/archive/delete แบบ real-time)
 - `GET /api/chat/sessions/:id/events` → SSE stream ต่อ `sessionId` (replay recent events จาก `.jsonl` + stream real-time ต่อ)
 - `POST /api/chat/hooks` → รับ JSON payload จาก `hook-forwarder.sh`
@@ -109,7 +115,8 @@
   - `layouts/DesktopShell.tsx` (`>= 1280px`): Split View `[SessionSidebar (260px)] | [ChatPanel (flex-1)]` + Top Bar (Rename, ContextBar, Theme toggle)
   - `layouts/CompactShell.tsx` (`< 1280px`): Compact Header ปุ่ม `☰` เปิด `SessionSidebar` แบบ Slide-over Drawer (พร้อมจุดแจ้งเตือนเมื่อมีห้อง background กำลังรัน) + `ChatPanel` เต็มความกว้างจอ
 - `components/SessionSidebar.tsx` (Reusable Panel):
-  - แสดงรายการ sessions ทั้งหมดที่เปิดอยู่ (ชื่อที่ตั้งเอง/preview ข้อความแรก, `model` badge, เวลาอัปเดตล่าสุด) และปุ่ม `+ New Session`
+  - แสดงรายการ sessions ทั้งหมดที่เปิดอยู่ (ชื่อที่ตั้งเอง/preview ข้อความแรก, `origin` badge เช่น `Web` / `CLI` / `tmux` / `IDE`, `model` badge, โฟลเดอร์โปรเจกต์ `cwd`, เวลาอัปเดตล่าสุด) และปุ่ม `+ New Session`
+  - **Filter & Search (พร้อมต่อยอดจาก Phase 2+):** กรองตาม **Origin** (`All` / `Web` / `CLI` / `tmux` / `IDE`), **Project (`cwd`)**, และช่องค้นหา (รองรับเพิ่ม filter `Harness` ใน Phase 5)
   - **Session Actions:** กด **Rename** (inline edit), **Archive / Unarchive** (ส่วน `Archived` พับเก็บได้ด้านล่าง), และ **Delete Permanently** (พร้อม confirm modal กันกดพลาด)
   - **Live Status Indicator:** ถ้า session ไหนกำลังทำงาน (`status === "running"`) ให้แสดง **loading spinner icon** หมุนอยู่ข้างชื่อ session (แม้กำลังเปิดดู session อื่นอยู่), และแสดง badge แจ้งเตือนเมื่อ `status === "waiting_permission"`
   - คลิกสลับดู session ใดก็ได้โดยไม่ขัดจังหวะ session อื่นที่กำลังทำงานใน background

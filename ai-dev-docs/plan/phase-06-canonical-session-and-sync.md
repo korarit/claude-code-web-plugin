@@ -51,9 +51,12 @@
 
 ## 4. Detailed Tasks
 
-### 4.1 Persistence (`apps/api` — `session` / `sync` store)
-- เพิ่ม persistent store (SQLite ผ่าน `bun:sqlite` หรือ append-only JSONL ใน `~/.harness-web/sessions/`) สำหรับเก็บ `CanonicalSession`, `canonicalEvents[]`, และ `bindings` (ทนต่อการ restart server)
+### 4.1 Persistence & External Auto-Ingest (`apps/api` — `session` / `sync` store)
+- เพิ่ม persistent store (SQLite ผ่าน `bun:sqlite` หรือ append-only JSONL ใน `~/.harness-web/sessions/`) สำหรับเก็บ `CanonicalSession` (รวม `origin` ที่เริ่ม session, `cwd`, `controlMode`), `canonicalEvents[]`, และ `bindings` (ทนต่อการ restart server)
 - สร้าง `CanonicalEventNormalizer` แปลง event ของ `claude`, `agy`, `opencode` ให้เป็น `CanonicalEvent` กลางที่มี `seq`, `harnessId`, `model`, `role`, `text`, `toolCalls[]` (เก็บครบทั้ง attribution ว่า harness/model ใดเป็นผู้แก้ไฟล์ในแต่ละ revision สำหรับ `ChangesDrawer` ด้วย)
+- **External Auto-Ingest (`ExternalSessionIngestService`):**
+  - เมื่อ Phase 2 + Phase 5 watcher/hook ตรวจพบ session ใหม่ที่ผู้ใช้คุยตรงกับ harness ข้างนอก (`origin`: `"cli"` | `"tmux"` | `"ide"` | `"opencode_server"`), ระบบ **normalize และบันทึก turns ทั้งหมดลง `CanonicalSessionStore` แบบ real-time อัตโนมัติ** พร้อมตั้ง `binding.lastSyncedSeq = latest` ให้ harness ต้นทาง
+  - ทำให้เมื่อเปิดหน้าเว็บแล้วกด **`Continue in Web`** หรือ **สลับไปใช้ harness อีกเจ้าหนึ่งทันที** มีประวัติตัวเต็มครบ 100% อยู่ใน Canonical Store แล้วพร้อมทำ Delta Sync โดยไม่ตกหล่น even 1 turn แรกที่คุยไว้ข้างนอก
 
 ### 4.2 Application Usecases (`apps/api`)
 - `SwitchHarnessUsecase`: ตรวจ availability ของ target harness, อัปเดต `activeHarness`, บันทึก switch marker event (`harness_switched`)
@@ -73,3 +76,4 @@
 3. สลับเข้า `OpenCode` ใน session เดียวกัน → ทำงานต่อและสลับกลับได้ครบ loop (`Claude ↔ AGY ↔ OpenCode`)
 4. ทดสอบเคสประวัติยาว (> threshold KB) → ระบบสร้างไฟล์ `.harness-web/sync/...md` อัตโนมัติ ไม่เกิด buffer truncation ใน `tmux` และยังอ้างอิงข้อมูลเก่าได้ถูกต้อง
 5. Restart `apps/api` → Canonical session, `canonicalEvents`, และ `lastSyncedSeq` ของทุกเจ้ายังอยู่ครบจาก persistent store
+6. ทดสอบคุยตรงกับ `claude` CLI / `Antigravity` นอกเว็บหลาย turns ระหว่างรันเซิร์ฟเวอร์ → ระบบ auto-ingest ลง Canonical Store อัตโนมัติ, เห็นป้ายต้นทาง (`CLI` / `IDE`), กด `Continue in Web` หรือสลับไปใช้ `OpenCode` แล้วคุยต่อได้ครบถ้วนโดยไม่เสีย turns แรกๆ ที่คุยไว้ข้างนอก

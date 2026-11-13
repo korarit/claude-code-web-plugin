@@ -28,13 +28,20 @@
 - **Frontend:**
   - `InteractionCard` (`PermissionBanner` + `QuestionCard`) ใน `ChatView.tsx`: render ปุ่ม Allow / Deny, Radio / Checkbox options, ช่องพิมพ์ตอบเอง, และปุ่มเปิด Terminal Fallback หากเจอ TUI dialog ที่ parser ไม่รู้จัก
 
-### 2.2 External Session Discovery
-- **เป้าหมาย:** ผู้ใช้เปิด `claude` เองใน terminal หรือ `tmux` นอกเว็บ แล้วเปิดหน้าเว็บมาดู/สั่งต่อได้ทันที
-- **Backend (`session.repository.ts`):**
-  - Scan `~/.claude/projects/<encoded-cwd>/*.jsonl` เพื่อดึงประวัติ session เดิมและสถิติ usage ล่าสุด
-  - Scan `tmux list-sessions` + `tmux list-panes -F "#{session_name} #{pane_current_command} #{pane_pid}"` เพื่อตรวจจับ session ที่กำลังรัน `claude` อยู่
-  - จับคู่ `tmux` session กับ `.jsonl` ผ่าน Hook payload (`session_id` + `transcript_path`) หรือ `cwd` + `mtime`
-  - เพิ่ม `POST /api/chat/sessions/:id/resume` สำหรับเปิด `tmux` session ใหม่โดยต่อ `--resume <id>` จากประวัติเดิม
+### 2.2 Real-Time External Session Auto-Discovery, Auto-Save & Origin Filtering
+- **เป้าหมาย:** เมื่อผู้ใช้คุยกับ harness โดยตรงใน Terminal / `tmux` / external tool ระหว่างที่รันโปรเจคนี้อยู่ ระบบตรวจจับ session ใหม่ให้อัตโนมัติ, **auto-save ประวัติลง store**, แสดง live stream บนเว็บ และกรองได้ชัดเจนว่า **session นี้เริ่มที่ไหน (`origin`) และโปรเจกต์ใด (`cwd`)**
+- **Backend — 2 กลไก Detect + Auto-Save อัตโนมัติ:**
+  1. **Hook-Driven Instant Detection (`POST /api/chat/hooks`):**
+     - เมื่อเปิดคุยใน CLI ข้างนอกแล้ว Hook (`SessionStart`, `UserPromptSubmit`, `Stop`) ยิงเข้ามาด้วย `session_id` + `transcript_path` + `cwd` ที่ระบบยังไม่เคยบันทึก → **auto-register & save** ลง `~/.harness-web/sessions.json` ทันที (idempotent dedup ด้วย `externalSessionId` / `transcriptPath`), ระบุ `origin` (`"tmux"` ถ้ารันใน tmux pane หรือ `"cli"` ถ้ารันนอก tmux), เริ่ม `jsonl-watcher` และ broadcast ขึ้น `SessionSidebar` แบบ real-time
+  2. **Background Directory & `tmux` Watcher (`session-discovery.service.ts`):**
+     - Scan ตอน startup + `fs.watch` / periodic poll บน `~/.claude/projects/<encoded-cwd>/*.jsonl` และ `tmux list-sessions` / `tmux list-panes -F "#{session_name} #{pane_current_command} #{pane_pid}"`
+     - รองรับเคส session ที่เปิดมาก่อนรันเซิร์ฟเวอร์ หรือเคสที่ไม่ได้ติดตั้ง hook โดย auto-save metadata + usage ล่าสุดลง persistent store เช่นกัน
+- **Control Mode & Takeover (`interactive` vs `mirror`):**
+  - **ถ้าอยู่ใน `tmux` (`origin: "tmux"`):** ผูกเป็น `controlMode: "interactive"` → ดูสดและพิมพ์สั่งงานต่อจากเว็บเข้า `tmux` เดิมได้ทันที
+  - **ถ้าเปิดใน Terminal เปล่านอก `tmux` (`origin: "cli"`):** ผูกเป็น `controlMode: "mirror"` → **auto-save ประวัติ + ดูแชทและไฟล์เปลี่ยนสด (Live Mirror)** โดยไม่แย่งเขียน stdin ใส่ terminal เดิม; หน้าเว็บแสดงปุ่ม **`Continue in Web`** (`POST /api/chat/sessions/:id/resume` ด้วย `--resume <externalSessionId>`) เพื่อเปิด `tmux` session ของเว็บมาสานต่อได้ทันทีโดยไม่เสียประวัติ
+- **Origin, Project (`cwd`) & Search Filtering:**
+  - `GET /api/chat/sessions?archived=...&origin=all|web|cli|tmux|ide|opencode_server&cwd=...&q=...`
+  - `SessionSidebar` เพิ่ม Filter Bar (English-only ผ่าน `locales/en.ts`): กรองตาม **Origin/Source** (`All` / `Web` / `CLI` / `tmux`), **Project (`cwd`)**, และ **Search** พร้อมแสดง badge ต้นทางในแต่ละแถว (`CLI`, `tmux`, `Web`)
 
 ### 2.3 Optional Live Terminal Drawer (Hybrid `tmux` + PTY Attach)
 - **Backend:** เพิ่ม WebSocket endpoint `/api/chat/sessions/:id/terminal` ที่ spawn `tmux attach-session -t <name>` ผ่าน PTY (หรือ fallback เป็น `tmux capture-pane` polling ถ้าเครื่องไม่มี PTY support)
@@ -71,7 +78,7 @@
 
 1. เมื่อ `claude` ติด permission prompt, `PermissionRequest` hook hold รอคำตัดสินจากหน้าเว็บ → กด Allow/Deny แล้วทำงานต่อได้โดยไม่ค้าง (และหากเว็บไม่เปิดอยู่ hook ต้อง fallback กลับสู่ TUI ภายใน timeout)
 2. เมื่อ `claude` เรียก `AskUserQuestion` (single/multi-select), หน้าเว็บแสดงตัวเลือกจาก `.jsonl` และส่ง keystrokes เข้า `tmux` เพื่อตอบจนผ่านได้
-3. เปิด `claude` ใน terminal ภายนอก → หน้าเว็บมองเห็น session ใน list และโหลดประวัติจาก `.jsonl` ได้ถูกต้อง
+3. เปิด `claude` คุยตรงๆ ใน terminal ภายนอกระหว่างที่ `apps/api` รันอยู่ → หน้าเว็บ **auto-detect และ auto-save** ลง `sessions.json` ทันที, เห็น session ใน `SessionSidebar` พร้อม badge `CLI` (`origin`), filter ตาม **Origin** และ **Project (`cwd`)** ได้ถูกต้อง, และกด **`Continue in Web`** เพื่อต่อ `--resume` ใน `tmux` ได้
 4. กด Resume session เก่าจากประวัติ `.jsonl` แล้วเปิด `tmux` ต่อบทสนทนาเดิมได้
 5. สามารถสลับสร้าง session แบบเลือก `cwd` ต่างกัน, ระบุ `agentProfile`, สั่ง `/model` หรือ `/compact` กลาง session, และใช้ `ANTHROPIC_API_KEY` (isolated env ใน `tmux new-session -e`) โดยไม่กระทบ global CLI login ของเครื่อง
 6. ทดสอบ Sound Notification: เปิดเสียงแล้วมี session ข้างหลังเสร็จหรือรอ permission → มีเสียงเตือน; กด Mute → เงียบสนิทและจำค่าไว้หลังรีเฟรชหน้า

@@ -29,7 +29,7 @@
 
 ## 2. English-Only Copy & Type-Safe i18n Foundation
 
-- **Strict UI Language Rule:** All visible UI labels, buttons, empty states, status badges, tooltips, confirmation modals, and client-side messages MUST be in **English** (`"New Session"`, `"Waiting for approval"`, `"Session Changes"`, `"Back to Main"`, `"Archive"`, `"Delete permanently"`).
+- **Strict UI Language Rule:** All visible UI labels, buttons, empty states, status badges, filter chips (`"All Sources"`, `"Web"`, `"CLI"`, `"tmux"`, `"IDE"`, `"Continue in Web"`), tooltips, confirmation modals, and client-side messages MUST be in **English** (`"New Session"`, `"Waiting for approval"`, `"Session Changes"`, `"Back to Main"`, `"Archive"`, `"Delete permanently"`).
 - **Type-Safe i18n Architecture (`apps/web/src/lib/i18n/`):**
   - `locales/en.ts`: Canonical typed dictionary (`export type TranslationMessages = typeof en`)
   - `I18nProvider.tsx` + `useTranslation()`: Exposes `t(key, params?)` with compile-time key safety, placeholder interpolation (`{{count}}`, `{{name}}`), and `Intl.RelativeTimeFormat` / `Intl.NumberFormat`
@@ -49,16 +49,18 @@
 | Left Rail (260px) | Center Stage (flex-1, min-w-0)                | Right Inspector (380-520px)   |
 |                   |                                               | (Toggleable / Resizable)      |
 | [+ New Session]   | [Subagent Banner: <- Back to Main | Child]    | [Changes (4)] | [Terminal]    |
-|                   |                                               |-------------------------------|
-| Active Sessions   |  User: Fix auth timeout bug...                | Mode: [Session] [All Git]     |
-|  * Fix Auth   [⟳] |  Assistant (Markdown + Copy Code):            | Filter: [All Harnesses v]     |
-|    claude·sonnet  |    > Edited src/auth.ts (+14 -3) [pill]       |                               |
-|    └ Research [⟳] |    > Collapsible Bash: bun test (passed)      | M src/auth.ts +14 -3 [claude] |
-|  o Refactor API   |                                               | A auth.test.ts +32   [agy]    |
-|    agy·gemini     |  [PendingInteraction Card (if waiting)]       |-------------------------------|
-|                   |  Allow `bun test`? [Allow Once] [Always] [No] | [Unified | Side-by-Side | Raw]|
-| > Archived (3)    |-----------------------------------------------+  12 - const x = 1;            |
-|                   | Composer: [@file] [/cmd] [Image] | [Model v]  |  12 + const x = 2;            |
+| [Search...]       | [Mirror Banner: CLI/IDE · Auto-saved          |-------------------------------|
+| [Src v][Har][Proj]|  [Continue in Web]] (when external mirror)    | Mode: [Session] [All Git]     |
+|                   |                                               | Filter: [All Harnesses v]     |
+| Active Sessions   |  User: Fix auth timeout bug...                |                               |
+|  * Fix Auth   [⟳] |  Assistant (Markdown + Copy Code):            | M src/auth.ts +14 -3 [claude] |
+|    web·claude·repo|    > Edited src/auth.ts (+14 -3) [pill]       | A auth.test.ts +32   [agy]    |
+|    └ Research [⟳] |    > Collapsible Bash: bun test (passed)      |-------------------------------|
+|  o IDE Session    |                                               | [Unified | Side-by-Side | Raw]|
+|    ide·agy·repo   |  [PendingInteraction Card (if waiting)]       |  12 - const x = 1;            |
+| > Archived (3)    |  Allow `bun test`? [Allow Once] [Always] [No] |  12 + const x = 2;            |
+|                   |-----------------------------------------------+                               |
+|                   | Composer: [@file] [/cmd] [Image] | [Model v]  |                               |
 |                   | [Type a prompt... (Enter to send)]            |                               |
 |                   | [Harness v]                   [Stop / Send]   |                               |
 +-------------------+-----------------------------------------------+-------------------------------+
@@ -67,7 +69,8 @@
 - **Key Desktop Behaviors:**
   - Clicking an inline file pill (`Edited src/auth.ts +14 -3`) opens the Right Inspector directly to that file's diff side-by-side with the chat.
   - `ChangesPanel` supports **Side-by-Side** and **Unified** diff toggles plus per-revision (`harnessId · model`) inspection.
-  - Left Rail displays active sessions, nested subagent trees with individual loading spinners, inline Rename, Archive drawer, and Permanent Delete.
+  - Left Rail displays active sessions (with `origin` badge: `web` / `cli` / `tmux` / `ide`, `harness · model`, and project folder), **multi-axis filters** (`Source/Origin`, `Harness`, `Project cwd`, `Search`), nested subagent trees with individual loading spinners, inline Rename, Archive drawer, and Permanent Delete.
+  - When viewing an auto-discovered external `mirror` session (`cli` outside `tmux` or `ide`), the Center Stage streams updates live and shows `[Continue in Web]` to adopt/resume it into an interactive runner (or switch harness).
 
 ---
 
@@ -113,9 +116,10 @@ Single-Focus Thumb-Friendly Workspace (`100dvh`, `env(safe-area-inset-bottom)`, 
 ```
 
 - **Key Compact / Mobile Behaviors:**
-  - **Slide-over Session Drawer (`☰`):** Opens `SessionSidebar` in an `85vw` (`max-w-[320px]`) slide-over sheet. When closed, the `☰` button shows a pulsing badge if any background session is `running` or `waiting_permission`.
+  - **Slide-over Session Drawer (`☰`):** Opens `SessionSidebar` (including `Source/Origin`, `Harness`, `Project cwd`, and `Search` filters) in an `85vw` (`max-w-[320px]`) slide-over sheet. When closed, the `☰` button shows a pulsing badge if any background session is `running` or `waiting_permission`.
   - **Unified Diff Default:** `ChangesPanel` defaults to **Unified Diff** with horizontal scroll scoped inside the code card only (never widening the viewport).
   - **Sticky Interaction Banner:** `PendingInteraction` (`Allow Once` / `Deny` / choice cards) pins directly above the composer so approvals never get buried in scroll.
+  - **External Mirror Banner:** When inspecting an external `cli` / `ide` `mirror` session on mobile, pins `[Continue in Web]` cleanly above the bottom bar.
   - **Terminal Accessory Toolbar:** Provides `[Tab]`, `[Esc]`, `[Ctrl+C]`, `[↑]`, `[↓]`, `[Enter]` above the virtual keyboard on the `Terminal` tab.
 
 ---
