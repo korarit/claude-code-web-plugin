@@ -1,11 +1,18 @@
 import type {
+  ChatInputRequest,
   ChatSendRequest,
   ChatStreamEvent,
+  ConcurrencyWarning,
   ModelId,
+  ResumeSessionRequest,
   SessionInfo,
   SessionOrigin,
   SessionsListEvent,
   SessionUpdateRequest,
+  TerminalClientMessage,
+  TerminalServerMessage,
+  UploadImageResponse,
+  WorkspaceFileEntry,
 } from "@contracts/chat";
 import type { ApiResponse } from "@contracts/http";
 import { safeJsonParse } from "@core/utils";
@@ -14,6 +21,8 @@ export interface HealthInfo {
   ok: boolean;
   tmuxAvailable: boolean;
   defaultCwd?: string;
+  apiKeyConfigured?: boolean;
+  concurrencySoftLimit?: number;
 }
 
 export interface SessionListQuery {
@@ -54,15 +63,44 @@ export async function fetchSessions(query: SessionListQuery = {}): Promise<Sessi
   return data.sessions;
 }
 
-export async function sendChat(
-  req: ChatSendRequest,
-): Promise<{ session: SessionInfo; isNewSession: boolean }> {
+export async function sendChat(req: ChatSendRequest): Promise<{
+  session: SessionInfo;
+  isNewSession: boolean;
+  concurrencyWarning?: ConcurrencyWarning;
+}> {
   const res = await fetch("/api/chat/send", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(req),
   });
-  return parseApiJson<{ session: SessionInfo; isNewSession: boolean }>(res);
+  return parseApiJson<{
+    session: SessionInfo;
+    isNewSession: boolean;
+    concurrencyWarning?: ConcurrencyWarning;
+  }>(res);
+}
+
+export async function resumeSession(
+  sessionId: string,
+  req: ResumeSessionRequest = {},
+): Promise<{ session: SessionInfo; concurrencyWarning?: ConcurrencyWarning }> {
+  const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/resume`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  return parseApiJson<{ session: SessionInfo; concurrencyWarning?: ConcurrencyWarning }>(res);
+}
+
+export async function sendInput(
+  req: ChatInputRequest,
+): Promise<{ session: SessionInfo; method: "hook" | "tmux"; resolved: boolean }> {
+  const res = await fetch("/api/chat/input", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  return parseApiJson<{ session: SessionInfo; method: "hook" | "tmux"; resolved: boolean }>(res);
 }
 
 export async function updateSession(
@@ -93,6 +131,33 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await parseApiJson<{ deleted: boolean; id: string }>(res);
 }
 
+export async function fetchWorkspaceFiles(
+  cwd?: string,
+  q?: string,
+): Promise<WorkspaceFileEntry[]> {
+  const params = new URLSearchParams();
+  if (cwd) params.set("cwd", cwd);
+  if (q) params.set("q", q);
+  const qs = params.toString();
+  const res = await fetch(`/api/workspace/files${qs ? `?${qs}` : ""}`);
+  const data = await parseApiJson<{ files: WorkspaceFileEntry[] }>(res);
+  return data.files;
+}
+
+export async function uploadChatImage(
+  file: File,
+  cwd?: string,
+): Promise<UploadImageResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  if (cwd) form.append("cwd", cwd);
+  const res = await fetch("/api/chat/upload", {
+    method: "POST",
+    body: form,
+  });
+  return parseApiJson<UploadImageResponse>(res);
+}
+
 const CHAT_EVENT_TYPES = [
   "init",
   "user",
@@ -103,6 +168,8 @@ const CHAT_EVENT_TYPES = [
   "error",
   "status",
   "permission_prompt",
+  "interaction",
+  "interaction_resolved",
 ] as const;
 
 export function subscribeSessionEvents(
@@ -155,5 +222,40 @@ export function subscribeSessionsListEvents(
 
   return () => {
     es.close();
+  };
+}
+
+export function connectTerminalWs(
+  sessionId: string,
+  handlers: {
+    onMessage: (msg: TerminalServerMessage) => void;
+    onOpen?: () => void;
+    onClose?: () => void;
+  },
+): {
+  send: (msg: TerminalClientMessage) => void;
+  close: () => void;
+} {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const url = `${protocol}//${window.location.host}/api/chat/sessions/${encodeURIComponent(sessionId)}/terminal`;
+  const ws = new WebSocket(url);
+
+  ws.onopen = () => handlers.onOpen?.();
+  ws.onclose = () => handlers.onClose?.();
+  ws.onmessage = (ev) => {
+    if (typeof ev.data !== "string") return;
+    const parsed = safeJsonParse<TerminalServerMessage>(ev.data);
+    if (parsed) handlers.onMessage(parsed);
+  };
+
+  return {
+    send: (msg) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg));
+      }
+    },
+    close: () => {
+      ws.close();
+    },
   };
 }

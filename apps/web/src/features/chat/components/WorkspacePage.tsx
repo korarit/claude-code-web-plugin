@@ -1,10 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { SessionStatus } from "@contracts/chat";
+import {
+  loadSoundMuted,
+  playAttentionSound,
+  playCompletedSound,
+  playErrorSound,
+  saveSoundMuted,
+} from "../../../lib/sound.ts";
 import { fetchHealth } from "../api.ts";
 import { useChat } from "../hooks/useChat.ts";
 import { useSessions } from "../hooks/useSessions.ts";
 import ChatPanel from "./ChatPanel.tsx";
 import SessionSidebar from "./SessionSidebar.tsx";
-import CompactShell from "../layouts/CompactShell.tsx";
+import TerminalPanel from "./TerminalPanel.tsx";
+import CompactShell, { type CompactViewTab } from "../layouts/CompactShell.tsx";
 import DesktopShell from "../layouts/DesktopShell.tsx";
 
 function parseSessionIdFromPath(pathname: string): string | undefined {
@@ -33,16 +42,21 @@ function useIsDesktop(): boolean {
 export default function WorkspacePage() {
   const isDesktop = useIsDesktop();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [compactTab, setCompactTab] = useState<CompactViewTab>("chat");
+  const [soundMuted, setSoundMuted] = useState<boolean>(() => loadSoundMuted());
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(() =>
     typeof window !== "undefined" ? parseSessionIdFromPath(window.location.pathname) : undefined,
   );
   const [tmuxAvailable, setTmuxAvailable] = useState(true);
+  const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [defaultCwd, setDefaultCwd] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     fetchHealth()
       .then((h) => {
         setTmuxAvailable(h.tmuxAvailable);
+        setApiKeyConfigured(Boolean(h.apiKeyConfigured));
         if (h.defaultCwd) setDefaultCwd(h.defaultCwd);
       })
       .catch(() => {});
@@ -65,6 +79,14 @@ export default function WorkspacePage() {
     }
   }, []);
 
+  const toggleSound = useCallback(() => {
+    setSoundMuted((prev) => {
+      const next = !prev;
+      saveSoundMuted(next);
+      return next;
+    });
+  }, []);
+
   const {
     sessions,
     activeSessions,
@@ -80,10 +102,52 @@ export default function WorkspacePage() {
     hasBackgroundActivity,
   } = useSessions();
 
+  // Play sound notifications when sessions transition into waiting_permission or finish in background.
+  const prevStatusMapRef = useRef<Map<string, SessionStatus>>(new Map());
+  useEffect(() => {
+    const prevMap = prevStatusMapRef.current;
+    const nextMap = new Map<string, SessionStatus>();
+    let playAttention = false;
+    let playCompleted = false;
+
+    for (const s of sessions) {
+      nextMap.set(s.id, s.status);
+      const prevStatus = prevMap.get(s.id);
+      if (!prevStatus || prevStatus === s.status) continue;
+
+      if (s.status === "waiting_permission") {
+        playAttention = true;
+      } else if (
+        prevStatus === "running" &&
+        s.status === "idle" &&
+        (s.id !== activeSessionId || document.hidden)
+      ) {
+        playCompleted = true;
+      }
+    }
+
+    prevStatusMapRef.current = nextMap;
+    if (playAttention) {
+      playAttentionSound(soundMuted);
+    } else if (playCompleted) {
+      playCompletedSound(soundMuted);
+    }
+  }, [sessions, activeSessionId, soundMuted]);
+
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId),
     [sessions, activeSessionId],
   );
+
+  const recentCwds = useMemo(() => {
+    const set = new Set<string>(availableCwds);
+    if (defaultCwd) set.add(defaultCwd);
+    return [...set];
+  }, [availableCwds, defaultCwd]);
+
+  const handleErrorNotification = useCallback(() => {
+    playErrorSound(soundMuted);
+  }, [soundMuted]);
 
   const chat = useChat({
     activeSessionId,
@@ -96,6 +160,7 @@ export default function WorkspacePage() {
     onSessionUpdated: (updated) => {
       upsertLocal(updated);
     },
+    onErrorNotification: handleErrorNotification,
   });
 
   const handleDelete = useCallback(
@@ -107,6 +172,14 @@ export default function WorkspacePage() {
     },
     [activeSessionId, navigateSession, remove],
   );
+
+  const handleOpenTerminal = useCallback(() => {
+    if (isDesktop) {
+      setTerminalOpen(true);
+    } else {
+      setCompactTab("terminal");
+    }
+  }, [isDesktop]);
 
   const sidebarNode = (
     <SessionSidebar
@@ -129,10 +202,16 @@ export default function WorkspacePage() {
     <ChatPanel
       activeSession={activeSession}
       tmuxAvailable={tmuxAvailable}
+      apiKeyConfigured={apiKeyConfigured}
+      recentCwds={recentCwds}
       model={chat.model}
-      onModelChange={chat.setModel}
+      onModelChange={(m) => void chat.setModel(m)}
       cwd={chat.cwd}
       onCwdChange={chat.setCwd}
+      authMode={chat.authMode}
+      onAuthModeChange={chat.setAuthMode}
+      agentProfile={chat.agentProfile}
+      onAgentProfileChange={chat.setAgentProfile}
       draft={chat.draft}
       onDraftChange={chat.setDraft}
       messages={chat.messages}
@@ -140,11 +219,29 @@ export default function WorkspacePage() {
       usage={chat.usage}
       status={chat.status}
       permissionPrompt={chat.permissionPrompt}
+      pendingInteraction={chat.pendingInteraction}
+      concurrencyWarning={chat.concurrencyWarning}
+      submittingInteraction={chat.submittingInteraction}
+      resuming={chat.resuming}
+      uploadingImage={chat.uploadingImage}
       sending={chat.sending}
       error={chat.error}
       onSend={() => void chat.send()}
       onAbort={() => void chat.abort()}
+      onSubmitDecision={(d) => void chat.submitDecision(d)}
+      onSubmitQuestion={(a) => void chat.submitQuestion(a)}
+      onContinueInWeb={() => void chat.continueInWeb()}
+      onUploadImage={(file) => void chat.uploadImage(file)}
+      onOpenTerminal={handleOpenTerminal}
       showInlineContextBar={!isDesktop}
+    />
+  );
+
+  const terminalNode = (
+    <TerminalPanel
+      activeSession={activeSession}
+      onContinueInWeb={() => void chat.continueInWeb()}
+      resuming={chat.resuming}
     />
   );
 
@@ -153,9 +250,14 @@ export default function WorkspacePage() {
       <DesktopShell
         activeSession={activeSession}
         usage={chat.usage}
+        terminalOpen={terminalOpen}
+        onToggleTerminal={() => setTerminalOpen((v) => !v)}
+        soundMuted={soundMuted}
+        onToggleSound={toggleSound}
         onRenameSession={rename}
         sidebar={sidebarNode}
         chat={chatNode}
+        terminal={terminalNode}
       />
     );
   }
@@ -167,9 +269,14 @@ export default function WorkspacePage() {
       hasBackgroundActivity={hasBackgroundActivity(activeSessionId)}
       drawerOpen={drawerOpen}
       onDrawerOpenChange={setDrawerOpen}
+      activeTab={compactTab}
+      onTabChange={setCompactTab}
+      soundMuted={soundMuted}
+      onToggleSound={toggleSound}
       onNewSession={() => navigateSession(undefined)}
       sidebar={sidebarNode}
       chat={chatNode}
+      terminal={terminalNode}
     />
   );
 }

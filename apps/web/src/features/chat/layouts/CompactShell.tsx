@@ -3,7 +3,10 @@ import type { SessionInfo } from "@contracts/chat";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 import type { UsageState } from "../hooks/useChat.ts";
 import ContextBar from "../components/ContextBar.tsx";
+import SoundToggle from "../components/SoundToggle.tsx";
 import ThemeSwitcher from "../components/ThemeSwitcher.tsx";
+
+export type CompactViewTab = "chat" | "terminal";
 
 export interface CompactShellProps {
   activeSession?: SessionInfo;
@@ -11,9 +14,14 @@ export interface CompactShellProps {
   hasBackgroundActivity: boolean;
   drawerOpen: boolean;
   onDrawerOpenChange: (open: boolean) => void;
+  activeTab: CompactViewTab;
+  onTabChange: (tab: CompactViewTab) => void;
+  soundMuted: boolean;
+  onToggleSound: () => void;
   onNewSession: () => void;
   sidebar: ReactNode;
   chat: ReactNode;
+  terminal: ReactNode;
 }
 
 export default function CompactShell({
@@ -22,9 +30,14 @@ export default function CompactShell({
   hasBackgroundActivity,
   drawerOpen,
   onDrawerOpenChange,
+  activeTab,
+  onTabChange,
+  soundMuted,
+  onToggleSound,
   onNewSession,
   sidebar,
   chat,
+  terminal,
 }: CompactShellProps) {
   const { t } = useTranslation();
 
@@ -45,9 +58,7 @@ export default function CompactShell({
           </button>
 
           <span className="truncate text-xs font-semibold text-[var(--text-primary)]">
-            {activeSession?.title ||
-              activeSession?.lastMessagePreview ||
-              t("appName")}
+            {activeSession?.title || activeSession?.lastMessagePreview || t("appName")}
           </span>
         </div>
 
@@ -59,13 +70,41 @@ export default function CompactShell({
           >
             +
           </button>
+          <SoundToggle muted={soundMuted} onToggle={onToggleSound} />
           <ThemeSwitcher />
         </div>
       </header>
 
       <ContextBar usage={usage} variant="strip" />
 
-      <div className="flex min-h-0 flex-1">{chat}</div>
+      <div className="flex min-h-0 flex-1">
+        {activeTab === "chat" ? chat : <div className="min-w-0 flex-1">{terminal}</div>}
+      </div>
+
+      <nav className="flex h-12 shrink-0 items-center border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] pb-[env(safe-area-inset-bottom)]">
+        <button
+          type="button"
+          onClick={() => onTabChange("chat")}
+          className={`flex-1 py-2 text-xs font-semibold ${
+            activeTab === "chat"
+              ? "text-[var(--text-primary)]"
+              : "text-[var(--text-muted)]"
+          }`}
+        >
+          {t("chatTab")}
+        </button>
+        <button
+          type="button"
+          onClick={() => onTabChange("terminal")}
+          className={`flex-1 py-2 text-xs font-semibold ${
+            activeTab === "terminal"
+              ? "text-[var(--text-primary)]"
+              : "text-[var(--text-muted)]"
+          }`}
+        >
+          {t("terminalTab")}
+        </button>
+      </nav>
 
       {drawerOpen && (
         <div className="fixed inset-0 z-40 flex">

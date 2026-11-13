@@ -3,22 +3,33 @@ import type { SessionInfo } from "@contracts/chat";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 import type { UsageState } from "../hooks/useChat.ts";
 import ContextBar from "../components/ContextBar.tsx";
+import SoundToggle from "../components/SoundToggle.tsx";
 import ThemeSwitcher from "../components/ThemeSwitcher.tsx";
 
 export interface DesktopShellProps {
   activeSession?: SessionInfo;
   usage: UsageState;
+  terminalOpen: boolean;
+  onToggleTerminal: () => void;
+  soundMuted: boolean;
+  onToggleSound: () => void;
   onRenameSession?: (sessionId: string, title: string) => Promise<unknown>;
   sidebar: ReactNode;
   chat: ReactNode;
+  terminal: ReactNode;
 }
 
 export default function DesktopShell({
   activeSession,
   usage,
+  terminalOpen,
+  onToggleTerminal,
+  soundMuted,
+  onToggleSound,
   onRenameSession,
   sidebar,
   chat,
+  terminal,
 }: DesktopShellProps) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
@@ -101,8 +112,21 @@ export default function DesktopShell({
           )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2">
           <ContextBar usage={usage} variant="inline" />
+          <button
+            type="button"
+            onClick={onToggleTerminal}
+            aria-pressed={terminalOpen}
+            className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              terminalOpen
+                ? "border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--text-primary)]"
+                : "border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            }`}
+          >
+            {t("terminalTab")}
+          </button>
+          <SoundToggle muted={soundMuted} onToggle={onToggleSound} />
           <ThemeSwitcher />
         </div>
       </header>
@@ -112,6 +136,11 @@ export default function DesktopShell({
           {sidebar}
         </div>
         <div className="flex min-w-0 flex-1">{chat}</div>
+        {terminalOpen && (
+          <aside className="w-[420px] shrink-0 border-l border-[var(--border-subtle)]">
+            {terminal}
+          </aside>
+        )}
       </div>
     </div>
   );
