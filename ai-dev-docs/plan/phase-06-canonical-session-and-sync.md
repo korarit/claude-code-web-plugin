@@ -1,6 +1,6 @@
 # Phase 6: Canonical Session Store & Full-Verbatim Cross-Harness Sync
 
-> **Status:** 📋 Planned  
+> **Status:** ✅ Done  
 > **Parent Plan:** [roadmap.md](./roadmap.md)  
 > **Depends On:** [Phase 5](./phase-05-multi-harness-adapters.md)
 
