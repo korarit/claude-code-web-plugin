@@ -7,6 +7,9 @@ export interface Env {
   harnessHome: string;
   claudeHome: string;
   token: string;
+  anthropicApiKey?: string;
+  concurrencySoftLimit?: number;
+  permissionHookTimeoutMs?: number;
 }
 
 export const DEFAULT_HOST = "127.0.0.1";
@@ -40,6 +43,21 @@ export function parseEnv(
   const harnessHome = env["HARNESS_WEB_HOME"] ?? join(home, ".harness-web");
   const claudeHome = env["CLAUDE_HOME"] ?? join(home, ".claude");
   const token = env["HARNESS_WEB_TOKEN"] ?? globalThis.crypto.randomUUID();
+  const anthropicApiKey = env["ANTHROPIC_API_KEY"]?.trim() || undefined;
+  const concurrencySoftLimit = Math.max(1, Number(env["HARNESS_CONCURRENCY_LIMIT"] ?? 3) || 3);
+  const permissionHookTimeoutMs = Math.max(
+    1_000,
+    Number(env["HARNESS_PERMISSION_TIMEOUT_MS"] ?? 55_000) || 55_000,
+  );
 
-  return { host, port, harnessHome, claudeHome, token };
+  return {
+    host,
+    port,
+    harnessHome,
+    claudeHome,
+    token,
+    anthropicApiKey,
+    concurrencySoftLimit,
+    permissionHookTimeoutMs,
+  };
 }

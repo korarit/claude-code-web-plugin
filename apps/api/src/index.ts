@@ -7,15 +7,23 @@ import { errorPlugin } from "./plugins.ts";
 import { chatRoutes } from "./modules/chat/presentation/chat.routes.ts";
 import { markStopped } from "./modules/chat/domain/session.entity.ts";
 import type { SessionRepository } from "./modules/chat/domain/repository.port.ts";
-import type {
-  EventBusPort,
-  TerminalRunnerPort,
-  TranscriptWatcherPort,
-} from "./modules/chat/application/ports.ts";
+import {
+  DiscoverSessionUsecase,
+  InteractionCoordinator,
+  watchTranscriptWithSync,
+  type EventBusPort,
+  type TerminalAttachPort,
+  type TerminalRunnerPort,
+  type TranscriptWatcherPort,
+  type WorkspacePort,
+} from "./modules/chat/application/index.ts";
 import { InMemoryEventBus } from "./modules/chat/infrastructure/event-bus.ts";
 import { JsonlTranscriptWatcher } from "./modules/chat/infrastructure/jsonl-watcher.ts";
 import { FileSessionRepository } from "./modules/chat/infrastructure/session.repository.ts";
+import { SessionDiscoveryService } from "./modules/chat/infrastructure/session-discovery.service.ts";
+import { TmuxCaptureTerminalAdapter } from "./modules/chat/infrastructure/terminal-attach.service.ts";
 import { TmuxRunner } from "./modules/chat/infrastructure/tmux-runner.ts";
+import { LocalWorkspaceAdapter } from "./modules/chat/infrastructure/workspace.adapter.ts";
 
 const WEB_DIST = join(import.meta.dir, "../../web/dist");
 
@@ -58,6 +66,9 @@ export interface CreateAppOptions {
   runner?: TerminalRunnerPort;
   watcher?: TranscriptWatcherPort;
   eventBus?: EventBusPort;
+  coordinator?: InteractionCoordinator;
+  terminalAttach?: TerminalAttachPort;
+  workspace?: WorkspacePort;
   defaultCwd?: string;
 }
 
@@ -68,7 +79,23 @@ export function createApp(options: CreateAppOptions = {}) {
   const runner = options.runner ?? new TmuxRunner();
   const watcher = options.watcher ?? new JsonlTranscriptWatcher(env.claudeHome);
   const eventBus = options.eventBus ?? new InMemoryEventBus();
+  const coordinator = options.coordinator ?? new InteractionCoordinator();
+  const terminalAttach = options.terminalAttach ?? new TmuxCaptureTerminalAdapter(runner);
+  const workspace = options.workspace ?? new LocalWorkspaceAdapter();
   const defaultCwd = options.defaultCwd ?? process.cwd();
+
+  const discoverUsecase = new DiscoverSessionUsecase(
+    sessions,
+    watcher,
+    eventBus,
+    systemClock,
+    coordinator,
+  );
+  const discovery = new SessionDiscoveryService({
+    claudeHome: env.claudeHome,
+    discoverUsecase,
+    runner,
+  });
 
   const app = new Elysia()
     .use(errorPlugin({ host: env.host, token: env.token }))
@@ -78,13 +105,23 @@ export function createApp(options: CreateAppOptions = {}) {
         runner,
         watcher,
         eventBus,
-        runtime: { port: env.port, token: env.token, defaultCwd },
+        coordinator,
+        terminalAttach,
+        workspace,
+        runtime: {
+          port: env.port,
+          token: env.token,
+          defaultCwd,
+          anthropicApiKey: env.anthropicApiKey,
+          concurrencySoftLimit: env.concurrencySoftLimit,
+          permissionHookTimeoutMs: env.permissionHookTimeoutMs,
+        },
       }),
     )
     .get("/api/*", () => new Response(JSON.stringify({ ok: false }), { status: 404 }))
     .get("/*", async ({ path }) => (await serveStatic(path)) ?? serveIndex());
 
-  return { app, env, sessions, runner, watcher, eventBus };
+  return { app, env, sessions, runner, watcher, eventBus, coordinator, discovery };
 }
 
 export async function reconcilePersistedSessions(
@@ -92,6 +129,7 @@ export async function reconcilePersistedSessions(
   runner: TerminalRunnerPort,
   watcher: TranscriptWatcherPort,
   eventBus: EventBusPort,
+  coordinator?: InteractionCoordinator,
 ): Promise<void> {
   const active = await runner.listActiveSessions().catch(() => []);
   const activeNames = new Set(active.map((a) => a.name));
@@ -103,9 +141,16 @@ export async function reconcilePersistedSessions(
       sessions.save(markStopped(session, systemClock));
     }
 
-    if (!session.archivedAt && session.transcriptPath && (aliveInTmux || existsSync(session.transcriptPath))) {
-      await watcher.watch(session.id, session.transcriptPath, (event) => {
-        eventBus.publish(session.id, event);
+    if (
+      !session.archivedAt &&
+      session.transcriptPath &&
+      (aliveInTmux || existsSync(session.transcriptPath))
+    ) {
+      await watchTranscriptWithSync(session.id, session.transcriptPath, {
+        sessions,
+        watcher,
+        eventBus,
+        coordinator,
       });
     }
   }
@@ -129,14 +174,16 @@ function writeRuntimeLock(env: Env, actualPort: number): string {
 }
 
 if (import.meta.main) {
-  const { app, env, sessions, runner, watcher, eventBus } = createApp();
-  await reconcilePersistedSessions(sessions, runner, watcher, eventBus);
+  const { app, env, sessions, runner, watcher, eventBus, coordinator, discovery } = createApp();
+  await reconcilePersistedSessions(sessions, runner, watcher, eventBus, coordinator);
+  discovery.start();
 
   app.listen({ hostname: env.host, port: env.port });
   const actualPort = app.server?.port ?? env.port;
   const runtimePath = writeRuntimeLock(env, actualPort);
 
   const cleanup = () => {
+    discovery.stop();
     try {
       rmSync(runtimePath, { force: true });
     } catch {

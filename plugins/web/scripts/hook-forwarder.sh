@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Forward Claude Code Hook JSON from stdin to local harness-web API.
-# Must ALWAYS exit 0 quickly (<200ms) even when the web server is stopped.
+# Must ALWAYS exit 0 quickly (<200ms) when the web server is stopped,
+# except PermissionRequest which long-polls for a Web UI decision with timeout fallback.
 set -u
 
 HARNESS_HOME="${HARNESS_WEB_HOME:-$HOME/.harness-web}"
@@ -38,12 +39,41 @@ if [[ -z "$PAYLOAD" ]]; then
   PAYLOAD="{}"
 fi
 
+EVENT_NAME=""
+if command -v jq >/dev/null 2>&1; then
+  EVENT_NAME="$(printf '%s' "$PAYLOAD" | jq -r '.hook_event_name // .hookEventName // empty' 2>/dev/null || true)"
+else
+  EVENT_NAME="$(printf '%s' "$PAYLOAD" | grep -oE '"hook_event_name"[[:space:]]*:[[:space:]]*"[^"]+"' | sed -E 's/.*"([^"]+)"$/\1/' | head -n1 || true)"
+fi
+
 HEADERS=(-H "Content-Type: application/json")
 if [[ -n "$TOKEN" ]]; then
   HEADERS+=(-H "X-Harness-Token: ${TOKEN}")
 fi
 if [[ -n "${CLAUDE_WEB_SESSION_ID:-}" ]]; then
   HEADERS+=(-H "X-Claude-Web-Session-Id: ${CLAUDE_WEB_SESSION_ID}")
+fi
+if [[ -n "${TMUX_PANE:-}" ]] && command -v tmux >/dev/null 2>&1; then
+  TMUX_NAME="$(tmux display-message -p -t "${TMUX_PANE}" '#{session_name}' 2>/dev/null || true)"
+  if [[ -n "$TMUX_NAME" ]]; then
+    HEADERS+=(-H "X-Tmux-Session: ${TMUX_NAME}")
+  fi
+fi
+
+if [[ "$EVENT_NAME" == "PermissionRequest" ]]; then
+  HEADERS+=(-H "X-Harness-Wait-Decision: 1")
+  RESPONSE="$(curl -sS --connect-timeout 0.15 -m 60 -X POST \
+    "http://127.0.0.1:${PORT}/api/chat/hooks" \
+    "${HEADERS[@]}" \
+    -d "$PAYLOAD" 2>/dev/null || true)"
+
+  if [[ -n "$RESPONSE" ]] && command -v jq >/dev/null 2>&1; then
+    HOOK_JSON="$(printf '%s' "$RESPONSE" | jq -c '.data.hookOutput // empty' 2>/dev/null || true)"
+    if [[ -n "$HOOK_JSON" && "$HOOK_JSON" != "null" ]]; then
+      printf '%s\n' "$HOOK_JSON"
+    fi
+  fi
+  exit 0
 fi
 
 curl -sS --connect-timeout 0.1 -m 0.15 -X POST \

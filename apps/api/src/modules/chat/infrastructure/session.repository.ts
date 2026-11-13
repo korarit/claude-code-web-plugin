@@ -99,8 +99,10 @@ export class FileSessionRepository extends InMemorySessionRepository {
             harnessId: s.harnessId ?? "claude",
             origin: s.origin ?? "web",
             controlMode: s.controlMode ?? "interactive",
+            authMode: s.authMode ?? "machine_default",
             status: s.status ?? "idle",
             archivedAt: s.archivedAt ?? null,
+            pendingInteraction: s.pendingInteraction ?? null,
           });
         }
       }

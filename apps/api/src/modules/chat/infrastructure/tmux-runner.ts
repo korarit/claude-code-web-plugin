@@ -45,7 +45,7 @@ export function shellQuote(value: string): string {
 }
 
 export function buildClaudeInteractiveCommand(
-  options: Pick<EnsureSessionOptions, "sessionId" | "model" | "resumeSessionId">,
+  options: Pick<EnsureSessionOptions, "sessionId" | "model" | "resumeSessionId" | "agentProfile">,
   claudeBin = "claude",
 ): string {
   const args: string[] = [claudeBin];
@@ -57,6 +57,9 @@ export function buildClaudeInteractiveCommand(
   if (options.model) {
     args.push("--model", options.model);
   }
+  if (options.agentProfile) {
+    args.push("--agent", options.agentProfile);
+  }
   return args.map(shellQuote).join(" ");
 }
 
@@ -66,7 +69,7 @@ export function buildNewSessionArgs(
   claudeBin = "claude",
 ): string[] {
   const command = buildClaudeInteractiveCommand(options, claudeBin);
-  return [
+  const args = [
     "new-session",
     "-d",
     "-s",
@@ -79,8 +82,14 @@ export function buildNewSessionArgs(
     `CLAUDE_WEB_PORT=${options.port}`,
     "-e",
     `CLAUDE_WEB_TOKEN=${options.token}`,
-    command,
   ];
+
+  if (options.authMode === "api_key" && options.apiKey) {
+    args.push("-e", `ANTHROPIC_API_KEY=${options.apiKey}`);
+  }
+
+  args.push(command);
+  return args;
 }
 
 export interface TmuxRunnerConfig {
@@ -129,7 +138,7 @@ export class TmuxRunner implements TerminalRunnerPort {
       throw new TmuxNotAvailableError();
     }
 
-    const tmuxSession = tmuxSessionName(options.sessionId);
+    const tmuxSession = options.tmuxSessionName || tmuxSessionName(options.sessionId);
     const has = await this.exec([this.tmuxBin, "has-session", "-t", tmuxSession]);
     if (has.exitCode === 0) {
       return { tmuxSession, isNew: false };
@@ -191,6 +200,30 @@ export class TmuxRunner implements TerminalRunnerPort {
     }
   }
 
+  async sendKeysSequence(tmuxSession: string, keys: string[]): Promise<void> {
+    for (const key of keys) {
+      await this.sendRawKeys(tmuxSession, key);
+    }
+  }
+
+  async capturePane(tmuxSession: string, lines = 80): Promise<string> {
+    const res = await this.exec([
+      this.tmuxBin,
+      "capture-pane",
+      "-p",
+      "-S",
+      `-${lines}`,
+      "-t",
+      tmuxSession,
+    ]);
+    if (res.exitCode !== 0) {
+      throw new ClaudeSpawnError(
+        res.stderr.trim() || `tmux capture-pane failed with exit code ${res.exitCode}`,
+      );
+    }
+    return res.stdout;
+  }
+
   async abortSession(tmuxSession: string): Promise<void> {
     await this.exec([this.tmuxBin, "send-keys", "-t", tmuxSession, "C-c"]);
   }
@@ -202,21 +235,31 @@ export class TmuxRunner implements TerminalRunnerPort {
   async listActiveSessions(): Promise<ActiveTerminalSession[]> {
     const res = await this.exec([
       this.tmuxBin,
-      "list-sessions",
+      "list-panes",
+      "-a",
       "-F",
-      "#{session_name}\t#{session_path}",
+      "#{session_name}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}",
     ]);
     if (res.exitCode !== 0) return [];
 
-    return res.stdout
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const [name, cwd] = line.split("\t");
-        return { name: name ?? "", cwd: cwd || undefined };
-      })
-      .filter((item) => item.name.length > 0);
+    const byName = new Map<string, ActiveTerminalSession>();
+    for (const rawLine of res.stdout.split("\n")) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      const [name, cwd, paneCommand, panePidStr] = line.split("\t");
+      if (!name) continue;
+      const panePid = panePidStr ? Number(panePidStr) : undefined;
+      const existing = byName.get(name);
+      if (!existing || (paneCommand && paneCommand.toLowerCase().includes("claude"))) {
+        byName.set(name, {
+          name,
+          cwd: cwd || undefined,
+          paneCommand: paneCommand || undefined,
+          panePid: Number.isFinite(panePid) ? panePid : undefined,
+        });
+      }
+    }
+    return [...byName.values()];
   }
 
   private async waitUntilReady(sessionId: string, tmuxSession: string): Promise<void> {

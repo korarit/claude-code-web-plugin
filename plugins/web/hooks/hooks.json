@@ -49,7 +49,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hook-forwarder.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/hook-forwarder.sh",
+            "timeout": 65
           }
         ]
       }

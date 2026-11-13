@@ -1,6 +1,8 @@
 import { existsSync, statSync, watch, type FSWatcher } from "node:fs";
 import { open, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import type { PendingInteraction, QuestionItem } from "@contracts/chat";
+import { newInteractionId } from "@core/ids";
 import { safeJsonParse, truncate } from "@core/utils";
 import type { DomainChatEvent, TokenUsage } from "../domain/chat.events.ts";
 import type { TranscriptWatcherPort } from "../application/ports.ts";
@@ -87,6 +89,65 @@ function extractToolResultText(content: unknown): string | undefined {
   return undefined;
 }
 
+function parseAskUserQuestionInteraction(
+  toolUseId: string | undefined,
+  input: unknown,
+  timestamp?: string,
+): PendingInteraction | null {
+  if (!input || typeof input !== "object") return null;
+  const obj = input as Record<string, unknown>;
+  const rawQuestions = Array.isArray(obj["questions"])
+    ? obj["questions"]
+    : typeof obj["question"] === "string"
+      ? [obj]
+      : [];
+
+  const questions: QuestionItem[] = [];
+  for (let i = 0; i < rawQuestions.length; i++) {
+    const q = rawQuestions[i];
+    if (!q || typeof q !== "object") continue;
+    const qObj = q as Record<string, unknown>;
+    const prompt = typeof qObj["question"] === "string" ? qObj["question"] : "";
+    if (!prompt) continue;
+
+    const rawOptions = Array.isArray(qObj["options"]) ? qObj["options"] : [];
+    const options = rawOptions
+      .map((opt, idx) => {
+        if (typeof opt === "string") {
+          return { id: String(idx), label: opt };
+        }
+        if (opt && typeof opt === "object") {
+          const o = opt as Record<string, unknown>;
+          const label = typeof o["label"] === "string" ? o["label"] : String(o["id"] ?? idx);
+          const description = typeof o["description"] === "string" ? o["description"] : undefined;
+          return { id: label, label, description };
+        }
+        return null;
+      })
+      .filter((item): item is { id: string; label: string; description?: string } => item !== null);
+
+    questions.push({
+      id: typeof qObj["header"] === "string" && qObj["header"] ? qObj["header"] : `q-${i}`,
+      header: typeof qObj["header"] === "string" ? qObj["header"] : undefined,
+      prompt,
+      multiSelect: Boolean(qObj["multiSelect"]),
+      options,
+      allowCustomText: true,
+    });
+  }
+
+  if (questions.length === 0) return null;
+
+  return {
+    id: toolUseId ?? newInteractionId(),
+    sessionId: "",
+    kind: "question",
+    toolUseId,
+    questions,
+    createdAt: timestamp ?? new Date().toISOString(),
+  };
+}
+
 export function parseClaudeTranscriptLine(raw: string): DomainChatEvent[] {
   const trimmed = raw.trim();
   if (!trimmed) return [];
@@ -147,6 +208,15 @@ export function parseClaudeTranscriptLine(raw: string): DomainChatEvent[] {
             parentToolUseId,
             timestamp,
           });
+          if (block.tool_use_id) {
+            events.push({
+              id: `resolved-${block.tool_use_id}`,
+              type: "interaction_resolved",
+              toolUseId: block.tool_use_id,
+              interactionId: block.tool_use_id,
+              timestamp,
+            });
+          }
         }
       }
     }
@@ -178,6 +248,18 @@ export function parseClaudeTranscriptLine(raw: string): DomainChatEvent[] {
             parentToolUseId: isTask ? (block.id ?? parentToolUseId) : parentToolUseId,
             timestamp,
           });
+          if (block.name === "AskUserQuestion") {
+            const interaction = parseAskUserQuestionInteraction(block.id, block.input, timestamp);
+            if (interaction) {
+              events.push({
+                id: `interaction-${interaction.id}`,
+                type: "interaction",
+                toolUseId: block.id,
+                interaction,
+                timestamp,
+              });
+            }
+          }
         }
       }
     }
