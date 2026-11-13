@@ -710,4 +710,395 @@ describe("Phase 6: Canonical Session Store & Full-Verbatim Cross-Harness Sync", 
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test("regression: discovery dedup, stale hooks, first-time Claude switch --session-id, /model slash preservation, OpenCode chunk merge, adopted echo dedup, and restart backfill", async () => {
+    const root = mkdtempSync(join(tmpdir(), "hw-p6-regressions-"));
+    const projectDir = join(root, "repo");
+    mkdirSync(projectDir, { recursive: true });
+
+    try {
+      const env = makeEnv(root);
+      const claude = new StubHarnessAdapter("claude", "Claude CLI", "sonnet", ["sonnet", "opus"]);
+      const agy = new StubHarnessAdapter("agy", "Antigravity CLI", "gemini-2.5-pro", [
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+      ]);
+      const opencode = new StubHarnessAdapter("opencode", "OpenCode", "anthropic/claude-sonnet-4-5", [
+        "anthropic/claude-sonnet-4-5",
+      ]);
+
+      const runner: TerminalRunnerPort = {
+        isAvailable: async () => true,
+        ensureSession: async ({ sessionId, tmuxSessionName }) => ({
+          tmuxSession: tmuxSessionName ?? `cw-${sessionId.slice(0, 8)}`,
+          isNew: true,
+        }),
+        sendPrompt: async () => {},
+        sendRawKeys: async () => {},
+        abortSession: async () => {},
+        stopSession: async () => {},
+        listActiveSessions: async () => [],
+      };
+
+      const registry = new HarnessRegistry([claude, agy, opencode]);
+      const ctx = createApp({ env, runner, harnessRegistry: registry });
+
+      // (A) OpenCode -> Claude first time must NOT pass resumeSessionId (--resume fails on new Claude id)
+      const ocCreate = await ctx.app.handle(
+        new Request("http://localhost/api/chat/send", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            harnessId: "opencode",
+            model: "anthropic/claude-sonnet-4-5",
+            cwd: projectDir,
+            prompt: "Start in OpenCode",
+          }),
+        }),
+      );
+      expect(ocCreate.status).toBe(202);
+      const ocSession = ((await ocCreate.json()) as { data: { session: SessionInfo } }).data.session;
+
+      // (B) OpenCode chunked streaming deltas merge into ONE canonical assistant event
+      opencode.emitEvent(ocSession.id, {
+        id: "prt_100-0",
+        type: "delta",
+        role: "assistant",
+        text: "Hello ",
+        model: "anthropic/claude-sonnet-4-5",
+        timestamp: "2026-11-13T13:00:01.000Z",
+      });
+      opencode.emitEvent(ocSession.id, {
+        id: "prt_100-6",
+        type: "delta",
+        role: "assistant",
+        text: "verbatim ",
+        model: "anthropic/claude-sonnet-4-5",
+        timestamp: "2026-11-13T13:00:02.000Z",
+      });
+      opencode.emitEvent(ocSession.id, {
+        id: "prt_100-15",
+        type: "delta",
+        role: "assistant",
+        text: "world!",
+        model: "anthropic/claude-sonnet-4-5",
+        timestamp: "2026-11-13T13:00:03.000Z",
+      });
+      opencode.emitEvent(ocSession.id, { type: "status", status: "idle" });
+
+      // Simulate external ingest also returning full text part
+      await ctx.externalIngest.ingestSession(ocSession, [
+        {
+          id: "prt_100-0",
+          type: "delta",
+          role: "assistant",
+          text: "Hello verbatim world!",
+          model: "anthropic/claude-sonnet-4-5",
+          timestamp: "2026-11-13T13:00:03.000Z",
+        },
+      ]);
+
+      const canonOc = ctx.canonicalSyncService.getCanonicalHistory(ocSession.id);
+      const ocAssistantMsgs = canonOc!.events.filter((e) => e.role === "assistant" && e.kind === "message");
+      expect(ocAssistantMsgs.length).toBe(1);
+      expect(ocAssistantMsgs[0]!.text).toBe("Hello verbatim world!");
+
+      // Switch OpenCode -> Claude first time
+      const swClaude = await ctx.app.handle(
+        new Request(`http://localhost/api/chat/sessions/${ocSession.id}/switch-harness`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ harnessId: "claude", model: "sonnet" }),
+        }),
+      );
+      expect(swClaude.status).toBe(200);
+
+      // (C) Sending `/model opus` after switch must NOT inject sync preamble and must leave delta pending
+      const sendSlash = await ctx.app.handle(
+        new Request("http://localhost/api/chat/send", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId: ocSession.id,
+            prompt: "/model opus",
+          }),
+        }),
+      );
+      expect(sendSlash.status).toBe(202);
+      expect(claude.startCalls[0]!.resumeSessionId).toBeUndefined();
+      expect(claude.sentPrompts[0]!.prompt).toBe("/model opus");
+      claude.emitEvent(ocSession.id, { type: "status", status: "idle" });
+
+      // Now send a real prompt -> delta from OpenCode IS delivered verbatim!
+      const sendAfterSlash = await ctx.app.handle(
+        new Request("http://localhost/api/chat/send", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId: ocSession.id,
+            prompt: "What did OpenCode say?",
+          }),
+        }),
+      );
+      expect(sendAfterSlash.status).toBe(202);
+      expect(claude.sentPrompts[1]!.prompt).toContain("Hello verbatim world!");
+      expect(claude.sentPrompts[1]!.prompt).not.toContain("/model opus");
+      claude.emitEvent(ocSession.id, { type: "status", status: "idle" });
+
+      // (D) Discovery dedup & stale hook isolation after switching external CLI session -> AGY
+      const extDiscovered = await ctx.discovery["config"].discoverUsecase.execute({
+        externalSessionId: "ext-dedup-cli-1",
+        harnessId: "claude",
+        transcriptPath: join(projectDir, "ext-dedup-cli-1.jsonl"),
+        cwd: projectDir,
+        origin: "cli",
+        model: "claude-opus-4-6",
+        lastMessagePreview: "CLI initial prompt",
+        messageCount: 1,
+      });
+
+      await ctx.canonicalSyncService.ingestHistory(
+        {
+          sessionId: extDiscovered.id,
+          harnessId: "claude",
+          origin: "cli",
+          controlMode: "mirror",
+          cwd: projectDir,
+          externalSessionId: "ext-dedup-cli-1",
+          transcriptPath: join(projectDir, "ext-dedup-cli-1.jsonl"),
+        },
+        [
+          {
+            id: "u-ext-1",
+            type: "user",
+            role: "user",
+            text: "CLI initial prompt",
+            timestamp: "2026-11-13T13:01:00.000Z",
+          },
+        ],
+        true,
+      );
+
+      const swAgy = await ctx.app.handle(
+        new Request(`http://localhost/api/chat/sessions/${extDiscovered.id}/switch-harness`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ harnessId: "agy" }),
+        }),
+      );
+      expect(swAgy.status).toBe(200);
+
+      // Re-discover the old Claude externalSessionId -> MUST NOT create duplicate session or revert harnessId!
+      const rediscovered = await ctx.discovery["config"].discoverUsecase.execute({
+        externalSessionId: "ext-dedup-cli-1",
+        harnessId: "claude",
+        transcriptPath: join(projectDir, "ext-dedup-cli-1.jsonl"),
+        cwd: projectDir,
+        origin: "cli",
+        model: "claude-opus-4-6",
+        lastMessagePreview: "CLI second prompt",
+        messageCount: 2,
+      });
+      expect(rediscovered.id).toBe(extDiscovered.id);
+      expect(rediscovered.harnessId).toBe("agy");
+
+      const allSessionsRes = await ctx.app.handle(new Request("http://localhost/api/chat/sessions"));
+      const allSessions = (
+        (await allSessionsRes.json()) as { data: { sessions: SessionInfo[] } }
+      ).data.sessions;
+      expect(allSessions.filter((s) => s.cwd === projectDir).length).toBe(2);
+
+      // Stale Claude SessionEnd hook referencing old externalSessionId MUST NOT stop the active AGY session
+      const staleHook = await ctx.app.handle(
+        new Request("http://localhost/api/chat/hooks", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            hook_event_name: "SessionEnd",
+            harness_id: "claude",
+            session_id: "ext-dedup-cli-1",
+          }),
+        }),
+      );
+      expect(staleHook.status).toBe(200);
+      expect(ctx.sessions.get(extDiscovered.id)?.harnessId).toBe("agy");
+      expect(ctx.sessions.get(extDiscovered.id)?.status).toBe("idle");
+
+      // (E) Adopted external CLI session deduplicates web prompt echo on SSE
+      const sseStreamRes = await ctx.app.handle(
+        new Request(`http://localhost/api/chat/sessions/${extDiscovered.id}/events`),
+      );
+      const sseReader = sseStreamRes.body!.getReader();
+      await ctx.app.handle(
+        new Request("http://localhost/api/chat/send", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId: extDiscovered.id,
+            prompt: "Adopted interactive prompt",
+          }),
+        }),
+      );
+      // Emit disk echo for the same prompt + assistant reply
+      agy.emitEvent(extDiscovered.id, {
+        id: "agy-u-echo",
+        type: "user",
+        role: "user",
+        text: "<!-- harness-web-sync:from=1:to=1:strategy=direct_verbatim -->\n...\n<!-- /harness-web-sync -->\n\nAdopted interactive prompt",
+        timestamp: "2026-11-13T13:02:01.000Z",
+      });
+      agy.emitEvent(extDiscovered.id, {
+        id: "agy-a-echo",
+        type: "delta",
+        role: "assistant",
+        text: "Adopted reply",
+        timestamp: "2026-11-13T13:02:02.000Z",
+      });
+      agy.emitEvent(extDiscovered.id, { type: "status", status: "idle" });
+
+      const sseEvents = await readSseUntil(
+        sseReader,
+        (evs) => evs.some((e) => e.type === "delta" && e.text === "Adopted reply"),
+        1500,
+      );
+      await sseReader.cancel();
+      const adoptedUserEvents = sseEvents.filter(
+        (e) => e.type === "user" && e.text === "Adopted interactive prompt",
+      );
+      expect(adoptedUserEvents.length).toBe(1);
+
+      // (F) Restart backfill with repeated "continue" web prompts does not duplicate earlier prompts
+      const claudeTranscript = join(root, "restart-claude.jsonl");
+      const claudeRestartId = "sess-restart-backfill";
+      const watcher = new JsonlTranscriptWatcher();
+      const restartClaude = new ClaudeHarnessAdapter({
+        claudeHome: env.claudeHome,
+        runner: runner as never,
+        watcher,
+      });
+
+      const webSessionEnv = ctx.sessions.get(ocSession.id)!;
+      // Cleanly test on a dedicated Claude session with real transcript file
+      writeFileSync(
+        claudeTranscript,
+        [
+          JSON.stringify({
+            type: "user",
+            uuid: "u-r-1",
+            cwd: projectDir,
+            timestamp: "2026-11-13T13:05:00.000Z",
+            message: { role: "user", content: "continue" },
+          }),
+          JSON.stringify({
+            type: "assistant",
+            uuid: "a-r-1",
+            cwd: projectDir,
+            timestamp: "2026-11-13T13:05:01.000Z",
+            message: { role: "assistant", model: "sonnet", content: [{ type: "text", text: "ok 1" }] },
+          }),
+          JSON.stringify({
+            type: "user",
+            uuid: "u-r-2",
+            cwd: projectDir,
+            timestamp: "2026-11-13T13:05:02.000Z",
+            message: { role: "user", content: "continue" },
+          }),
+          JSON.stringify({
+            type: "assistant",
+            uuid: "a-r-2",
+            cwd: projectDir,
+            timestamp: "2026-11-13T13:05:03.000Z",
+            message: { role: "assistant", model: "sonnet", content: [{ type: "text", text: "ok 2" }] },
+          }),
+        ].join("\n") + "\n",
+      );
+
+      // Simulate server state before restart (unkeyed web prompts matching transcript)
+      ctx.canonicalSyncService.ensureSession({
+        sessionId: claudeRestartId,
+        harnessId: "claude",
+        origin: "web",
+        controlMode: "interactive",
+        cwd: projectDir,
+        transcriptPath: claudeTranscript,
+      });
+      ctx.canonicalRepo.appendEvent({
+        canonicalSessionId: claudeRestartId,
+        id: "ce-web-u1",
+        harnessId: "claude",
+        model: "sonnet",
+        role: "user",
+        kind: "message",
+        text: "continue",
+        ts: "2026-11-13T13:05:00.000Z",
+      });
+      ctx.canonicalRepo.appendEvent({
+        canonicalSessionId: claudeRestartId,
+        id: "ce-web-u2",
+        harnessId: "claude",
+        model: "sonnet",
+        role: "user",
+        kind: "message",
+        text: "continue",
+        ts: "2026-11-13T13:05:02.000Z",
+      });
+      ctx.sessions.save({
+        ...webSessionEnv,
+        id: claudeRestartId,
+        harnessId: "claude",
+        externalSessionId: undefined,
+        tmuxSession: undefined,
+        transcriptPath: claudeTranscript,
+        status: "idle",
+      });
+
+      ctx.discovery.stop();
+      ctx.canonicalRepo.close();
+      await ctx.harnessRegistry.dispose();
+
+      // Write an offline turn while server is "stopped"
+      appendFileSync(
+        claudeTranscript,
+        JSON.stringify({
+          type: "user",
+          uuid: "u-r-3",
+          cwd: projectDir,
+          timestamp: "2026-11-13T13:06:00.000Z",
+          message: { role: "user", content: "Offline prompt while API stopped" },
+        }) + "\n",
+      );
+
+      const restarted = createApp({
+        env,
+        runner,
+        harnessRegistry: new HarnessRegistry([restartClaude, agy, opencode]),
+      });
+      await reconcilePersistedSessions(
+        restarted.sessions,
+        restarted.runner,
+        restarted.watcher,
+        restarted.eventBus,
+        restarted.coordinator,
+        restarted.fileChangeTracker,
+        restarted.agentTelemetry,
+        restarted.harnessGateway,
+        restarted.canonicalSync,
+      );
+
+      const backfilled = restarted.canonicalSyncService.getCanonicalHistory(claudeRestartId)!;
+      const continueEvents = backfilled.events.filter(
+        (e) => e.role === "user" && e.text === "continue",
+      );
+      expect(continueEvents.length).toBe(2);
+      expect(
+        backfilled.events.some((e) => e.text === "Offline prompt while API stopped"),
+      ).toBe(true);
+
+      restarted.discovery.stop();
+      restarted.canonicalRepo.close();
+      await restarted.harnessRegistry.dispose();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
