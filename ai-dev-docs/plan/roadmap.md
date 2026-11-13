@@ -19,6 +19,7 @@
 | **Phase 5** | [Multi-Harness Adapters (`Claude CLI`, `Antigravity CLI`, `OpenCode`)](./phase-05-multi-harness-adapters.md) | ✅ Done | [20261113-multi-harness-adapters.md](../feature/20261113-multi-harness-adapters.md) |
 | **Phase 6** | [Canonical Session Store & Full-Verbatim Cross-Harness Sync](./phase-06-canonical-session-and-sync.md) | ✅ Done | [20261113-canonical-session-and-sync.md](../feature/20261113-canonical-session-and-sync.md) |
 | **Phase 7** | [UI Polish (`shadcn/ui`), Boundary Enforcement & Packaging](./phase-07-ui-polish-boundaries-packaging.md) | ✅ Done | [code-structure.md](../code-structure.md) |
+| **Phase 8** | [Sequential Sub-Agent Playwright E2E Full Test (`agy` & `opencode`) + UX Issue Triage](./phase-08-e2e-playwright-agy-opencode.md) | ✅ Audited (31 Issues) | [AGENT.md](../../AGENT.md) |
 
 ---
 
