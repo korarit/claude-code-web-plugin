@@ -1,7 +1,8 @@
 # Phase 3: Session Code Preview, File Changes & Diff Viewer
 
-> **Status:** 📋 Planned  
+> **Status:** ✅ Done  
 > **Parent Plan:** [roadmap.md](./roadmap.md)  
+> **Feature Doc:** [20261113-code-preview-and-file-changes.md](../feature/20261113-code-preview-and-file-changes.md)  
 > **Depends On:** [Phase 2](./phase-02-interactive-controls-and-discovery.md)
 
 ## 1. Objective
