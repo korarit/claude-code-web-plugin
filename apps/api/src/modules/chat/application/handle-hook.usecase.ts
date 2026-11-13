@@ -78,6 +78,10 @@ export class HandleHookUsecase {
       }
     }
 
+    if (hook.harnessId && session.harnessId !== hook.harnessId) {
+      return ok({ matched: true, session });
+    }
+
     let next: Session = session;
     const timestamp = isoNow(this.clock);
 
@@ -453,6 +457,15 @@ export class HandleHookUsecase {
     if (hook.tmuxSession) {
       const byTmux = this.sessions.findByTmuxSession(hook.tmuxSession);
       if (byTmux) return byTmux;
+    }
+    const bindingSessionId = this.canonicalSync?.findSessionIdByBinding?.({
+      harnessId: hook.harnessId,
+      externalSessionId: hook.externalSessionId,
+      transcriptPath: hook.transcriptPath,
+    });
+    if (bindingSessionId) {
+      const byBinding = this.sessions.get(bindingSessionId);
+      if (byBinding) return byBinding;
     }
     return null;
   }

@@ -50,13 +50,34 @@ export class DiscoverSessionUsecase {
   ) {}
 
   async execute(input: DiscoveredSessionInput): Promise<Session> {
+    const bindingCanonicalId = this.canonicalSync?.findSessionIdByBinding?.({
+      harnessId: input.harnessId,
+      externalSessionId: input.externalSessionId,
+      transcriptPath: input.transcriptPath,
+    });
     const existing =
       this.sessions.findByExternalSessionId(input.externalSessionId) ??
       this.sessions.get(input.externalSessionId) ??
       (input.transcriptPath ? this.sessions.findByTranscriptPath(input.transcriptPath) : null) ??
-      (input.tmuxSession ? this.sessions.findByTmuxSession(input.tmuxSession) : null);
+      (input.tmuxSession ? this.sessions.findByTmuxSession(input.tmuxSession) : null) ??
+      (bindingCanonicalId ? this.sessions.get(bindingCanonicalId) : null);
 
     if (existing) {
+      if (input.harnessId && existing.harnessId !== input.harnessId) {
+        if (this.canonicalSync) {
+          await this.canonicalSync
+            .ingestExternalSession({
+              ...existing,
+              harnessId: input.harnessId,
+              externalSessionId: input.externalSessionId,
+              transcriptPath: input.transcriptPath ?? existing.transcriptPath,
+              tmuxSession: input.tmuxSession,
+            })
+            .catch(() => {});
+        }
+        return existing;
+      }
+
       let updated = existing;
       let changed = false;
 

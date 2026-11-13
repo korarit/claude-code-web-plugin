@@ -150,15 +150,22 @@ export class SendMessageUsecase {
     let preparedSync: PreparedSyncPrompt | undefined;
     if (this.canonicalSync) {
       this.canonicalSync.ensureSession(session);
-      preparedSync = await this.canonicalSync.preparePromptForSend(session, prompt, model);
+      if (slashModel) {
+        this.canonicalSync.updateBinding(session.id, harnessId, { model });
+      } else {
+        preparedSync = await this.canonicalSync.preparePromptForSend(session, prompt, model);
+      }
     }
 
     const promptToSend = preparedSync?.promptToSend ?? prompt;
+    const hasBindingSession = preparedSync
+      ? Boolean(preparedSync.hasTargetBindingSession)
+      : (this.canonicalSync?.hasEstablishedBinding?.(session.id, harnessId) ?? !isNewSession);
     const targetResumeId =
       preparedSync?.importedExternalSessionId ??
-      (isNewSession
-        ? undefined
-        : (session.externalSessionId ?? (harnessId === "claude" ? session.id : undefined)));
+      (hasBindingSession
+        ? (session.externalSessionId ?? (harnessId === "claude" ? session.id : undefined))
+        : undefined);
     const targetTmuxName = preparedSync?.suggestedTmuxSessionName ?? session.tmuxSession;
 
     if (this.harnessGateway) {
@@ -239,14 +246,24 @@ export class SendMessageUsecase {
     }
 
     let syncSummary = undefined;
-    if (this.canonicalSync && preparedSync) {
-      syncSummary = this.canonicalSync.commitPromptSent({
-        prepared: preparedSync,
-        model,
-        externalSessionId: session.externalSessionId,
-        tmuxSession: session.tmuxSession,
-        transcriptPath: session.transcriptPath,
-      });
+    if (this.canonicalSync) {
+      if (preparedSync) {
+        syncSummary = this.canonicalSync.commitPromptSent({
+          prepared: preparedSync,
+          model,
+          externalSessionId: session.externalSessionId,
+          tmuxSession: session.tmuxSession,
+          transcriptPath: session.transcriptPath,
+        });
+      } else {
+        this.canonicalSync.updateBinding(session.id, harnessId, {
+          externalSessionId: session.externalSessionId,
+          tmuxSession: session.tmuxSession,
+          transcriptPath: session.transcriptPath,
+          model,
+        });
+        syncSummary = this.canonicalSync.getSyncSummary(session.id, model);
+      }
     }
 
     this.sessions.save(session);

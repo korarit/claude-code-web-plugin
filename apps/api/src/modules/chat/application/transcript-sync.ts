@@ -151,7 +151,7 @@ export function createObservedEventHandler(
       const ingested = canonicalSync.ingestEvent(session, event);
       if (ingested.cleanUserText && event.type === "user") {
         event = { ...event, text: ingested.cleanUserText };
-        if (!ingested.inserted && session.origin === "web") {
+        if (!ingested.inserted && session.controlMode === "interactive") {
           duplicateWebUserEcho = true;
         }
       }

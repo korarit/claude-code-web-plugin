@@ -174,6 +174,7 @@ export interface PreparedSyncPrompt {
   largeContextWarning: boolean;
   importedExternalSessionId?: string;
   suggestedTmuxSessionName?: string;
+  hasTargetBindingSession?: boolean;
 }
 
 export interface CanonicalSyncPort {
@@ -201,8 +202,14 @@ export interface CanonicalSyncPort {
   updateBinding(
     sessionId: string,
     harnessId: HarnessId,
-    meta: { externalSessionId?: string; tmuxSession?: string; transcriptPath?: string },
+    meta: { externalSessionId?: string; tmuxSession?: string; transcriptPath?: string; model?: string },
   ): void;
+  findSessionIdByBinding?(params: {
+    harnessId?: HarnessId;
+    externalSessionId?: string;
+    transcriptPath?: string;
+  }): string | null;
+  hasEstablishedBinding?(sessionId: string, harnessId: HarnessId): boolean;
   getSyncSummary(sessionId: string, targetModel?: string): CanonicalSyncSummary | undefined;
   getCanonicalReplayEvents(sessionId: string, limit?: number): DomainChatEvent[];
   deleteSession(sessionId: string): void;

@@ -393,6 +393,13 @@ export function createApp(options: CreateAppOptions = {}) {
     updateBinding: (sessionId, harnessId, meta) => {
       canonicalSyncService.updateBinding(sessionId, harnessId, meta);
     },
+    findSessionIdByBinding: (params) => canonicalSyncService.findSessionIdByBinding(params),
+    hasEstablishedBinding: (sessionId, harnessId) => {
+      const binding = canonicalSyncService.getBinding(sessionId, harnessId);
+      return Boolean(
+        binding && (binding.externalSessionId || binding.tmuxSession || binding.transcriptPath),
+      );
+    },
     getSyncSummary: (sessionId, targetModel) =>
       canonicalSyncService.getSyncSummary(sessionId, targetModel),
     getCanonicalReplayEvents: (sessionId, limit) => {
@@ -784,6 +791,9 @@ export async function reconcilePersistedSessions(
       ((current.transcriptPath && (aliveInTmux || existsSync(current.transcriptPath))) ||
         current.harnessId === "opencode")
     ) {
+      if (canonicalSync) {
+        await canonicalSync.ingestExternalSession(current).catch(() => {});
+      }
       if (harnessGateway) {
         await observeHarnessSessionWithSync(current, {
           sessions,
