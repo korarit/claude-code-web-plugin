@@ -15,6 +15,9 @@ export interface Env {
   anthropicApiKey?: string;
   concurrencySoftLimit?: number;
   permissionHookTimeoutMs?: number;
+  syncByteThreshold?: number;
+  syncTurnThreshold?: number;
+  opencodeNativeImport?: boolean;
 }
 
 export const DEFAULT_HOST = "127.0.0.1";
@@ -59,6 +62,15 @@ export function parseEnv(
     1_000,
     Number(env["HARNESS_PERMISSION_TIMEOUT_MS"] ?? 55_000) || 55_000,
   );
+  const syncByteThreshold = Math.max(
+    512,
+    Number(env["HARNESS_SYNC_BYTE_THRESHOLD"] ?? 20 * 1024) || 20 * 1024,
+  );
+  const syncTurnThreshold = Math.max(
+    2,
+    Number(env["HARNESS_SYNC_TURN_THRESHOLD"] ?? 40) || 40,
+  );
+  const opencodeNativeImport = env["HARNESS_OPENCODE_NATIVE_IMPORT"] === "true";
 
   return {
     host,
@@ -74,5 +86,8 @@ export function parseEnv(
     anthropicApiKey,
     concurrencySoftLimit,
     permissionHookTimeoutMs,
+    syncByteThreshold,
+    syncTurnThreshold,
+    opencodeNativeImport,
   };
 }
