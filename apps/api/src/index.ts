@@ -12,6 +12,7 @@ import {
   InteractionCoordinator,
   watchTranscriptWithSync,
   type EventBusPort,
+  type FileChangeTrackerPort,
   type TerminalAttachPort,
   type TerminalRunnerPort,
   type TranscriptWatcherPort,
@@ -24,6 +25,16 @@ import { SessionDiscoveryService } from "./modules/chat/infrastructure/session-d
 import { TmuxCaptureTerminalAdapter } from "./modules/chat/infrastructure/terminal-attach.service.ts";
 import { TmuxRunner } from "./modules/chat/infrastructure/tmux-runner.ts";
 import { LocalWorkspaceAdapter } from "./modules/chat/infrastructure/workspace.adapter.ts";
+import {
+  RecordToolChangeUsecase,
+  type ChangeEventPublisherPort,
+  type SessionLookupPort,
+} from "./modules/changes/application/index.ts";
+import { FileChangesRepository } from "./modules/changes/infrastructure/changes.repository.ts";
+import { LocalGitWorkspaceAdapter } from "./modules/changes/infrastructure/git-workspace.adapter.ts";
+import { LocalWorkspaceFilesAdapter } from "./modules/changes/infrastructure/local-workspace-files.adapter.ts";
+import { FileSnapshotStore } from "./modules/changes/infrastructure/snapshot.store.ts";
+import { changesRoutes } from "./modules/changes/presentation/changes.routes.ts";
 
 const WEB_DIST = join(import.meta.dir, "../../web/dist");
 
@@ -84,12 +95,47 @@ export function createApp(options: CreateAppOptions = {}) {
   const workspace = options.workspace ?? new LocalWorkspaceAdapter();
   const defaultCwd = options.defaultCwd ?? process.cwd();
 
+  const changesRepo = new FileChangesRepository(join(env.harnessHome, "changes"));
+  const snapshotStore = new FileSnapshotStore(join(env.harnessHome, "snapshots"));
+  const workspaceFiles = new LocalWorkspaceFilesAdapter();
+  const gitWorkspace = new LocalGitWorkspaceAdapter();
+
+  const sessionLookup: SessionLookupPort = {
+    getSession: (id) => {
+      const s = sessions.get(id);
+      if (!s) return null;
+      return { id: s.id, cwd: s.cwd, harnessId: s.harnessId, model: s.model };
+    },
+  };
+  const changePublisher: ChangeEventPublisherPort = {
+    publishFileChanged: (sessionId, fileChange, timestamp) => {
+      eventBus.publish(sessionId, { type: "file_changed", fileChange, timestamp });
+    },
+  };
+  const recordToolChange = new RecordToolChangeUsecase(
+    changesRepo,
+    snapshotStore,
+    workspaceFiles,
+    gitWorkspace,
+    changePublisher,
+    systemClock,
+  );
+  const fileChangeTracker: FileChangeTrackerPort = {
+    onPreToolUse: (input) => recordToolChange.onPreToolUse(input),
+    onPostToolUse: (input) => recordToolChange.onPostToolUse(input),
+    deleteSession: async (sessionId) => {
+      changesRepo.deleteSession(sessionId);
+      await snapshotStore.deleteSessionSnapshots(sessionId);
+    },
+  };
+
   const discoverUsecase = new DiscoverSessionUsecase(
     sessions,
     watcher,
     eventBus,
     systemClock,
     coordinator,
+    fileChangeTracker,
   );
   const discovery = new SessionDiscoveryService({
     claudeHome: env.claudeHome,
@@ -108,6 +154,7 @@ export function createApp(options: CreateAppOptions = {}) {
         coordinator,
         terminalAttach,
         workspace,
+        fileChangeTracker,
         runtime: {
           port: env.port,
           token: env.token,
@@ -118,10 +165,31 @@ export function createApp(options: CreateAppOptions = {}) {
         },
       }),
     )
+    .use(
+      changesRoutes({
+        sessions: sessionLookup,
+        repo: changesRepo,
+        snapshots: snapshotStore,
+        files: workspaceFiles,
+        git: gitWorkspace,
+        defaultCwd,
+      }),
+    )
     .get("/api/*", () => new Response(JSON.stringify({ ok: false }), { status: 404 }))
     .get("/*", async ({ path }) => (await serveStatic(path)) ?? serveIndex());
 
-  return { app, env, sessions, runner, watcher, eventBus, coordinator, discovery };
+  return {
+    app,
+    env,
+    sessions,
+    runner,
+    watcher,
+    eventBus,
+    coordinator,
+    discovery,
+    fileChangeTracker,
+    changesRepo,
+  };
 }
 
 export async function reconcilePersistedSessions(
@@ -130,6 +198,7 @@ export async function reconcilePersistedSessions(
   watcher: TranscriptWatcherPort,
   eventBus: EventBusPort,
   coordinator?: InteractionCoordinator,
+  fileChangeTracker?: FileChangeTrackerPort,
 ): Promise<void> {
   const active = await runner.listActiveSessions().catch(() => []);
   const activeNames = new Set(active.map((a) => a.name));
@@ -151,6 +220,7 @@ export async function reconcilePersistedSessions(
         watcher,
         eventBus,
         coordinator,
+        fileChangeTracker,
       });
     }
   }
@@ -174,8 +244,25 @@ function writeRuntimeLock(env: Env, actualPort: number): string {
 }
 
 if (import.meta.main) {
-  const { app, env, sessions, runner, watcher, eventBus, coordinator, discovery } = createApp();
-  await reconcilePersistedSessions(sessions, runner, watcher, eventBus, coordinator);
+  const {
+    app,
+    env,
+    sessions,
+    runner,
+    watcher,
+    eventBus,
+    coordinator,
+    discovery,
+    fileChangeTracker,
+  } = createApp();
+  await reconcilePersistedSessions(
+    sessions,
+    runner,
+    watcher,
+    eventBus,
+    coordinator,
+    fileChangeTracker,
+  );
   discovery.start();
 
   app.listen({ hostname: env.host, port: env.port });

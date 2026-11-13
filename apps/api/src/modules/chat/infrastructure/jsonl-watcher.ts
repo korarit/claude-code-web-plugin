@@ -244,6 +244,7 @@ export function parseClaudeTranscriptLine(raw: string): DomainChatEvent[] {
             tool: block.name,
             toolUseId: block.id,
             toolInput: block.input,
+            model: line.message?.model,
             text: formatToolSummary(block.name, block.input),
             parentToolUseId: isTask ? (block.id ?? parentToolUseId) : parentToolUseId,
             timestamp,

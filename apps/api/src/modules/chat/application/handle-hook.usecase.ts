@@ -16,7 +16,12 @@ import {
 import type { DomainHookEvent } from "../domain/chat.events.ts";
 import type { SessionRepository } from "../domain/repository.port.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
-import type { EventBusPort, TerminalRunnerPort, TranscriptWatcherPort } from "./ports.ts";
+import type {
+  EventBusPort,
+  FileChangeTrackerPort,
+  TerminalRunnerPort,
+  TranscriptWatcherPort,
+} from "./ports.ts";
 import { watchTranscriptWithSync } from "./transcript-sync.ts";
 
 export interface HandleHookOutput {
@@ -42,6 +47,7 @@ export class HandleHookUsecase {
     private readonly clock: Clock = systemClock,
     private readonly coordinator?: InteractionCoordinator,
     private readonly permissionTimeoutMs = 55_000,
+    private readonly fileChangeTracker?: FileChangeTrackerPort,
   ) {}
 
   async execute(hook: DomainHookEvent): Promise<Result<HandleHookOutput, AppError>> {
@@ -66,6 +72,7 @@ export class HandleHookUsecase {
         watcher: this.watcher,
         eventBus: this.eventBus,
         coordinator: this.coordinator,
+        fileChangeTracker: this.fileChangeTracker,
         clock: this.clock,
       });
     }
@@ -88,6 +95,19 @@ export class HandleHookUsecase {
         break;
       }
       case "PreToolUse": {
+        if (this.fileChangeTracker && hook.toolName && (hook.cwd || next.cwd)) {
+          await this.fileChangeTracker
+            .onPreToolUse({
+              sessionId: next.id,
+              cwd: hook.cwd || next.cwd!,
+              harnessId: next.harnessId,
+              model: next.model,
+              toolName: hook.toolName,
+              toolUseId: hook.toolUseId,
+              toolInput: hook.toolInput,
+            })
+            .catch(() => {});
+        }
         if (next.status !== "running") {
           next = markRunning(next, this.clock);
           this.eventBus.publish(next.id, { type: "status", status: "running", timestamp });
@@ -95,6 +115,20 @@ export class HandleHookUsecase {
         break;
       }
       case "PostToolUse": {
+        if (this.fileChangeTracker && hook.toolName && (hook.cwd || next.cwd)) {
+          await this.fileChangeTracker
+            .onPostToolUse({
+              sessionId: next.id,
+              cwd: hook.cwd || next.cwd!,
+              harnessId: next.harnessId,
+              model: next.model,
+              toolName: hook.toolName,
+              toolUseId: hook.toolUseId,
+              toolInput: hook.toolInput,
+              editedAt: timestamp,
+            })
+            .catch(() => {});
+        }
         const prevPendingId = next.pendingInteraction?.id;
         const cleared = this.coordinator?.clearPending(next.id);
         if (next.pendingInteraction) {

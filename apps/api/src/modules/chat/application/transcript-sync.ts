@@ -8,7 +8,16 @@ import {
   setPendingInteraction,
 } from "../domain/session.entity.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
-import type { EventBusPort, TranscriptWatcherPort } from "./ports.ts";
+import type { EventBusPort, FileChangeTrackerPort, TranscriptWatcherPort } from "./ports.ts";
+
+const TRACKED_EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+
+interface PendingTrackedTool {
+  toolName: string;
+  toolInput?: unknown;
+  model?: string;
+  agentId?: string;
+}
 
 export async function watchTranscriptWithSync(
   sessionId: string,
@@ -18,10 +27,19 @@ export async function watchTranscriptWithSync(
     watcher: TranscriptWatcherPort;
     eventBus: EventBusPort;
     coordinator?: InteractionCoordinator;
+    fileChangeTracker?: FileChangeTrackerPort;
     clock?: Clock;
   },
 ): Promise<void> {
-  const { sessions, watcher, eventBus, coordinator, clock = systemClock } = deps;
+  const {
+    sessions,
+    watcher,
+    eventBus,
+    coordinator,
+    fileChangeTracker,
+    clock = systemClock,
+  } = deps;
+  const trackedTools = new Map<string, PendingTrackedTool>();
 
   await watcher.watch(sessionId, transcriptPath, (event: DomainChatEvent) => {
     const session = sessions.get(sessionId);
@@ -72,6 +90,56 @@ export async function watchTranscriptWithSync(
       }
       sessions.save(updated);
       eventBus.publishListEvent({ type: "upsert", session: updated });
+    }
+
+    if (
+      fileChangeTracker &&
+      session?.cwd &&
+      event.type === "tool" &&
+      event.tool &&
+      TRACKED_EDIT_TOOLS.has(event.tool) &&
+      event.toolUseId
+    ) {
+      trackedTools.set(event.toolUseId, {
+        toolName: event.tool,
+        toolInput: event.toolInput,
+        model: event.model,
+        agentId: event.parentToolUseId ?? undefined,
+      });
+      void fileChangeTracker.onPreToolUse({
+        sessionId,
+        cwd: session.cwd,
+        harnessId: session.harnessId,
+        model: event.model ?? session.model,
+        toolName: event.tool,
+        toolUseId: event.toolUseId,
+        toolInput: event.toolInput,
+        agentId: event.parentToolUseId ?? undefined,
+      });
+    }
+
+    if (
+      fileChangeTracker &&
+      session?.cwd &&
+      event.type === "tool" &&
+      event.tool === "tool_result" &&
+      event.toolUseId
+    ) {
+      const meta = trackedTools.get(event.toolUseId);
+      if (meta) {
+        trackedTools.delete(event.toolUseId);
+        void fileChangeTracker.onPostToolUse({
+          sessionId,
+          cwd: session.cwd,
+          harnessId: session.harnessId,
+          model: meta.model ?? session.model,
+          toolName: meta.toolName,
+          toolUseId: event.toolUseId,
+          toolInput: meta.toolInput,
+          agentId: meta.agentId,
+          editedAt: event.timestamp,
+        });
+      }
     }
 
     eventBus.publish(sessionId, event);

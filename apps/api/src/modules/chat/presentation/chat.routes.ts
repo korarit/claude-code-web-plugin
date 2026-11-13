@@ -31,6 +31,7 @@ import {
   UpdateSessionUsecase,
   UploadImageUsecase,
   type EventBusPort,
+  type FileChangeTrackerPort,
   type SendMessageRuntime,
   type TerminalAttachment,
   type TerminalAttachPort,
@@ -38,8 +39,6 @@ import {
   type TranscriptWatcherPort,
   type WorkspacePort,
 } from "../application/index.ts";
-import { TmuxCaptureTerminalAdapter } from "../infrastructure/terminal-attach.service.ts";
-import { LocalWorkspaceAdapter } from "../infrastructure/workspace.adapter.ts";
 
 function toChatContract(sessionId: string, event: DomainChatEvent): ChatStreamEvent {
   return { sessionId, ...event };
@@ -87,15 +86,23 @@ export interface ChatRoutesDeps {
   eventBus: EventBusPort;
   runtime: SendMessageRuntime;
   coordinator?: InteractionCoordinator;
-  terminalAttach?: TerminalAttachPort;
-  workspace?: WorkspacePort;
+  terminalAttach: TerminalAttachPort;
+  workspace: WorkspacePort;
+  fileChangeTracker?: FileChangeTrackerPort;
 }
 
 export function chatRoutes(deps: ChatRoutesDeps) {
-  const { sessions, runner, watcher, eventBus, runtime } = deps;
+  const {
+    sessions,
+    runner,
+    watcher,
+    eventBus,
+    runtime,
+    terminalAttach,
+    workspace,
+    fileChangeTracker,
+  } = deps;
   const coordinator = deps.coordinator ?? new InteractionCoordinator();
-  const terminalAttach = deps.terminalAttach ?? new TmuxCaptureTerminalAdapter(runner);
-  const workspace = deps.workspace ?? new LocalWorkspaceAdapter();
 
   const sendMessage = new SendMessageUsecase(
     sessions,
@@ -105,6 +112,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     runtime,
     systemClock,
     coordinator,
+    fileChangeTracker,
   );
   const handleHook = new HandleHookUsecase(
     sessions,
@@ -114,6 +122,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     systemClock,
     coordinator,
     runtime.permissionHookTimeoutMs ?? 55_000,
+    fileChangeTracker,
   );
   const sendInput = new SendInputUsecase(sessions, runner, eventBus, coordinator, systemClock);
   const resumeSession = new ResumeSessionUsecase(
@@ -124,6 +133,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     runtime,
     systemClock,
     coordinator,
+    fileChangeTracker,
   );
   const updateSession = new UpdateSessionUsecase(sessions, runner, watcher, eventBus);
   const abortSession = new AbortSessionUsecase(
@@ -139,6 +149,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     watcher,
     eventBus,
     coordinator,
+    fileChangeTracker,
   );
   const listWorkspaceFiles = new ListWorkspaceFilesUsecase(workspace, runtime.defaultCwd);
   const uploadImage = new UploadImageUsecase(workspace, runtime.defaultCwd);

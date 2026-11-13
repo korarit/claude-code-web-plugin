@@ -21,7 +21,12 @@ import {
 } from "../domain/errors.ts";
 import type { SessionRepository } from "../domain/repository.port.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
-import type { EventBusPort, TerminalRunnerPort, TranscriptWatcherPort } from "./ports.ts";
+import type {
+  EventBusPort,
+  FileChangeTrackerPort,
+  TerminalRunnerPort,
+  TranscriptWatcherPort,
+} from "./ports.ts";
 import { watchTranscriptWithSync } from "./transcript-sync.ts";
 
 export interface SendMessageInput {
@@ -62,6 +67,7 @@ export class SendMessageUsecase {
     private readonly runtime: SendMessageRuntime,
     private readonly clock: Clock = systemClock,
     private readonly coordinator?: InteractionCoordinator,
+    private readonly fileChangeTracker?: FileChangeTrackerPort,
   ) {}
 
   async execute(input: SendMessageInput): Promise<Result<SendMessageOutput, AppError>> {
@@ -158,6 +164,7 @@ export class SendMessageUsecase {
       watcher: this.watcher,
       eventBus: this.eventBus,
       coordinator: this.coordinator,
+      fileChangeTracker: this.fileChangeTracker,
       clock: this.clock,
     });
 

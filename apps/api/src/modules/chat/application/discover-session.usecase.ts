@@ -11,7 +11,7 @@ import {
 } from "../domain/session.entity.ts";
 import type { SessionRepository } from "../domain/repository.port.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
-import type { EventBusPort, TranscriptWatcherPort } from "./ports.ts";
+import type { EventBusPort, FileChangeTrackerPort, TranscriptWatcherPort } from "./ports.ts";
 import { watchTranscriptWithSync } from "./transcript-sync.ts";
 
 export interface DiscoveredSessionInput {
@@ -32,6 +32,7 @@ export class DiscoverSessionUsecase {
     private readonly eventBus: EventBusPort,
     private readonly clock: Clock = systemClock,
     private readonly coordinator?: InteractionCoordinator,
+    private readonly fileChangeTracker?: FileChangeTrackerPort,
   ) {}
 
   async execute(input: DiscoveredSessionInput): Promise<Session> {
@@ -108,6 +109,7 @@ export class DiscoverSessionUsecase {
         watcher: this.watcher,
         eventBus: this.eventBus,
         coordinator: this.coordinator,
+        fileChangeTracker: this.fileChangeTracker,
         clock: this.clock,
       });
     }

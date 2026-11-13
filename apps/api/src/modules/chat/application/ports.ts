@@ -82,3 +82,21 @@ export interface WorkspacePort {
   listFiles(cwd: string, query?: string, limit?: number): Promise<WorkspaceFileEntry[]>;
   saveImage(cwd: string, filename: string, bytes: Uint8Array): Promise<UploadImageResponse>;
 }
+
+export interface FileChangeToolInput {
+  sessionId: string;
+  cwd: string;
+  harnessId: string;
+  model: string;
+  toolName: string;
+  toolUseId?: string;
+  toolInput?: unknown;
+  agentId?: string;
+  editedAt?: string;
+}
+
+export interface FileChangeTrackerPort {
+  onPreToolUse(input: FileChangeToolInput): Promise<void>;
+  onPostToolUse(input: FileChangeToolInput): Promise<void>;
+  deleteSession?(sessionId: string): Promise<void>;
+}

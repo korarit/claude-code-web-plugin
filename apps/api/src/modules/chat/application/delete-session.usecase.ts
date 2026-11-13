@@ -3,7 +3,12 @@ import type { AppError } from "@core/errors";
 import { SessionNotFoundError } from "../domain/errors.ts";
 import type { SessionRepository } from "../domain/repository.port.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
-import type { EventBusPort, TerminalRunnerPort, TranscriptWatcherPort } from "./ports.ts";
+import type {
+  EventBusPort,
+  FileChangeTrackerPort,
+  TerminalRunnerPort,
+  TranscriptWatcherPort,
+} from "./ports.ts";
 
 export class DeleteSessionUsecase {
   constructor(
@@ -12,6 +17,7 @@ export class DeleteSessionUsecase {
     private readonly watcher: TranscriptWatcherPort,
     private readonly eventBus: EventBusPort,
     private readonly coordinator?: InteractionCoordinator,
+    private readonly fileChangeTracker?: FileChangeTrackerPort,
   ) {}
 
   async execute(sessionId: string): Promise<Result<{ deleted: true; id: string }, AppError>> {
@@ -23,6 +29,7 @@ export class DeleteSessionUsecase {
       await this.runner.stopSession(existing.tmuxSession).catch(() => {});
     }
     this.watcher.unwatch(existing.id);
+    await this.fileChangeTracker?.deleteSession?.(existing.id).catch(() => {});
     this.sessions.delete(existing.id);
     this.eventBus.clearSession(existing.id);
     this.eventBus.publishListEvent({ type: "delete", sessionId: existing.id });
