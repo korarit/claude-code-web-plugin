@@ -1,6 +1,8 @@
 import type {
+  AuthMode,
   HarnessId,
   ModelId,
+  PendingInteraction,
   SessionControlMode,
   SessionOrigin,
   SessionStatus,
@@ -16,6 +18,8 @@ export interface Session {
   status: SessionStatus;
   origin: SessionOrigin;
   controlMode: SessionControlMode;
+  authMode?: AuthMode;
+  agentProfile?: string;
   externalSessionId?: string;
   discoveredAt?: string;
   tmuxSession?: string;
@@ -23,6 +27,7 @@ export interface Session {
   cwd?: string;
   archivedAt?: string | null;
   lastMessagePreview?: string;
+  pendingInteraction?: PendingInteraction | null;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
@@ -35,12 +40,16 @@ export interface CreateSessionParams {
   status?: SessionStatus;
   origin?: SessionOrigin;
   controlMode?: SessionControlMode;
+  authMode?: AuthMode;
+  agentProfile?: string;
   externalSessionId?: string;
   discoveredAt?: string;
   tmuxSession?: string;
   transcriptPath?: string;
   cwd?: string;
   title?: string;
+  lastMessagePreview?: string;
+  messageCount?: number;
 }
 
 export function createSession(params: CreateSessionParams, clock: Clock): Session {
@@ -53,15 +62,19 @@ export function createSession(params: CreateSessionParams, clock: Clock): Sessio
     status: params.status ?? "idle",
     origin: params.origin ?? "web",
     controlMode: params.controlMode ?? "interactive",
+    authMode: params.authMode ?? "machine_default",
+    agentProfile: params.agentProfile,
     externalSessionId: params.externalSessionId,
     discoveredAt: params.discoveredAt,
     tmuxSession: params.tmuxSession,
     transcriptPath: params.transcriptPath,
     cwd: params.cwd,
     archivedAt: null,
+    lastMessagePreview: params.lastMessagePreview,
+    pendingInteraction: null,
     createdAt: now,
     updatedAt: now,
-    messageCount: 0,
+    messageCount: params.messageCount ?? 0,
   };
 }
 
@@ -94,6 +107,61 @@ export function markStopped(session: Session, clock: Clock): Session {
   return {
     ...session,
     status: "stopped",
+    pendingInteraction: null,
+    updatedAt: isoNow(clock),
+  };
+}
+
+export function setPendingInteraction(
+  session: Session,
+  interaction: PendingInteraction,
+  clock: Clock,
+): Session {
+  return {
+    ...session,
+    status: "waiting_permission",
+    pendingInteraction: interaction,
+    updatedAt: isoNow(clock),
+  };
+}
+
+export function clearPendingInteraction(session: Session, clock: Clock): Session {
+  if (!session.pendingInteraction) return session;
+  return {
+    ...session,
+    pendingInteraction: null,
+    updatedAt: isoNow(clock),
+  };
+}
+
+export function adoptToInteractive(
+  session: Session,
+  params: {
+    tmuxSession: string;
+    model?: ModelId;
+    authMode?: AuthMode;
+    agentProfile?: string;
+  },
+  clock: Clock,
+): Session {
+  return {
+    ...session,
+    controlMode: "interactive",
+    tmuxSession: params.tmuxSession,
+    model: params.model ?? session.model,
+    authMode: params.authMode ?? session.authMode ?? "machine_default",
+    agentProfile: params.agentProfile ?? session.agentProfile,
+    status: "idle",
+    pendingInteraction: null,
+    updatedAt: isoNow(clock),
+  };
+}
+
+export function updateSessionModel(session: Session, model: ModelId, clock: Clock): Session {
+  if (session.model === model) return session;
+  return {
+    ...session,
+    model,
     updatedAt: isoNow(clock),
   };
 }

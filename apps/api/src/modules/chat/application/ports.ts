@@ -1,4 +1,9 @@
-import type { ModelId } from "@contracts/chat";
+import type {
+  AuthMode,
+  ModelId,
+  UploadImageResponse,
+  WorkspaceFileEntry,
+} from "@contracts/chat";
 import type { DomainChatEvent, SessionListEvent } from "../domain/chat.events.ts";
 
 export interface EnsureSessionOptions {
@@ -8,6 +13,10 @@ export interface EnsureSessionOptions {
   port: number;
   token: string;
   resumeSessionId?: string;
+  authMode?: AuthMode;
+  apiKey?: string;
+  agentProfile?: string;
+  tmuxSessionName?: string;
 }
 
 export interface EnsureSessionResult {
@@ -18,6 +27,8 @@ export interface EnsureSessionResult {
 export interface ActiveTerminalSession {
   name: string;
   cwd?: string;
+  paneCommand?: string;
+  panePid?: number;
 }
 
 export interface TerminalRunnerPort {
@@ -25,10 +36,26 @@ export interface TerminalRunnerPort {
   ensureSession(options: EnsureSessionOptions): Promise<EnsureSessionResult>;
   sendPrompt(tmuxSession: string, prompt: string): Promise<void>;
   sendRawKeys(tmuxSession: string, keys: string): Promise<void>;
+  sendKeysSequence?(tmuxSession: string, keys: string[]): Promise<void>;
+  capturePane?(tmuxSession: string, lines?: number): Promise<string>;
   abortSession(tmuxSession: string): Promise<void>;
   stopSession(tmuxSession: string): Promise<void>;
   listActiveSessions(): Promise<ActiveTerminalSession[]>;
   notifyReady?(sessionId: string): void;
+}
+
+export interface TerminalAttachment {
+  sendKey(key: string): Promise<void>;
+  sendText(text: string): Promise<void>;
+  close(): void;
+}
+
+export interface TerminalAttachPort {
+  attach(
+    tmuxSession: string,
+    onScreen: (content: string) => void,
+    onError: (message: string) => void,
+  ): TerminalAttachment;
 }
 
 export interface TranscriptWatcherPort {
@@ -49,4 +76,9 @@ export interface EventBusPort {
   clearSession(sessionId: string): void;
   publishListEvent(event: SessionListEvent): void;
   subscribeListEvents(handler: (event: SessionListEvent) => void): () => void;
+}
+
+export interface WorkspacePort {
+  listFiles(cwd: string, query?: string, limit?: number): Promise<WorkspaceFileEntry[]>;
+  saveImage(cwd: string, filename: string, bytes: Uint8Array): Promise<UploadImageResponse>;
 }

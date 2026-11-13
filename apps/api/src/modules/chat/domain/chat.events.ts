@@ -1,4 +1,8 @@
-import type { PermissionPromptPayload, SessionStatus } from "@contracts/chat";
+import type {
+  PendingInteraction,
+  PermissionPromptPayload,
+  SessionStatus,
+} from "@contracts/chat";
 import type { Session } from "./session.entity.ts";
 
 export type DomainChatEventType =
@@ -10,7 +14,9 @@ export type DomainChatEventType =
   | "result"
   | "error"
   | "status"
-  | "permission_prompt";
+  | "permission_prompt"
+  | "interaction"
+  | "interaction_resolved";
 
 export interface TokenUsage {
   inputTokens?: number;
@@ -31,6 +37,8 @@ export interface DomainChatEvent {
   costUsd?: number;
   status?: SessionStatus;
   permissionPrompt?: PermissionPromptPayload;
+  interaction?: PendingInteraction;
+  interactionId?: string;
   message?: string;
   timestamp?: string;
 }
@@ -43,8 +51,10 @@ export interface DomainHookEvent {
   cwd?: string;
   hookEventName: string;
   toolName?: string;
+  toolUseId?: string;
   toolInput?: unknown;
   message?: string;
+  waitForDecision?: boolean;
 }
 
 export interface SessionListEvent {
