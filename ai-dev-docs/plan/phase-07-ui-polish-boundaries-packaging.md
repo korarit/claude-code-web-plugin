@@ -12,12 +12,12 @@
 ## 2. Scope & Detailed Tasks
 
 ### 2.1 UI Component System (`apps/web`)
-- ติดตั้งและตั้งค่า **shadcn/ui** (`components.json`, `src/lib/utils.ts` `cn()`, `src/components/ui/*`) ตาม [code-structure.md](../code-structure.md)
-- Refactor components ใน `features/chat` (Dialogs, Command Palette `Cmd+K` สำหรับสลับ session/model/harness, Tabs, Badges)
+- ติดตั้งและตั้งค่า **shadcn/ui** (`components.json`, `src/lib/utils.ts` `cn()`, `src/components/ui/*`) ตาม [code-structure.md](../code-structure.md) และ [ui-concept.md](../arc/ui-concept.md) (map token เข้ากับ Light/Dark CSS variables ของระบบ)
+- Refactor components ใน `features/chat` (Dialogs, Command Palette `Cmd+K` สำหรับสลับ session/model/harness/theme, Tabs, Badges)
 - ปรับปรุง 2 Layout Shells (Breakpoint `1280px` ตาม [roadmap.md](./roadmap.md)):
   - `DesktopShell` (`>= 1280px`): ใช้ `Resizable` split panels สำหรับ `SessionSidebar` + `ChatPanel` + `ChangesPanel` / `TerminalPanel`
-  - `CompactShell` (`< 1280px`): ใช้ `Sheet` (slide-over drawer) สำหรับ `SessionSidebar` + `Tabs` / bottom bar สำหรับสลับ `Chat` | `Changes` | `Agents` | `Terminal` เต็มจอ
-- ปรับปรุง accessibility และ keyboard shortcuts
+  - `CompactShell` (`< 1280px`): ใช้ `Sheet` (slide-over drawer) สำหรับ `SessionSidebar` + Bottom Bar / `Tabs` สำหรับสลับ `Chat` | `Changes` | `Agents` | `Terminal` เต็มจอ
+- ตรวจ i18n completeness (ห้ามมี hardcoded UI copy ใน JSX) และปรับปรุง accessibility, keyboard shortcuts
 
 ### 2.2 Automated Boundary & Code Quality Guardrails
 - เพิ่ม `eslint-plugin-boundaries` (หรือ custom dependency check script ใน Bun) บังคับกฎใน [code-structure.md](../code-structure.md):

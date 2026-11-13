@@ -101,16 +101,21 @@ apps/api/src/modules/chat/
   presentation/
     chat.routes.ts              # เพิ่ม SSE sidebar/session, POST /send, /abort, PATCH /sessions/:id, DELETE /sessions/:id, /input, /hooks
 
-apps/web/src/features/chat/
-  api.ts                        # subscribeSessionEvents, subscribeSessionsListEvents, sendChat, sendInput, updateSession, abortSession, deleteSession
-  hooks/useChat.ts              # sync state จาก SSE stream ของ session แทนการรอ response ราย request
-  hooks/useSessions.ts          # sync รายการ sessions + live status (running/idle/waiting_permission) สำหรับ sidebar
-  layouts/DesktopShell.tsx      # >= 1280px: Multi-pane split layout (Sidebar + Chat + future side panels)
-  layouts/CompactShell.tsx      # < 1280px: Slide-over drawer Sidebar + single-focus Chat/tab view
-  components/WorkspacePage.tsx  # ถือ shared state (useSessions + useChat) + resource route /sessions/:id
-  components/SessionSidebar.tsx # แสดงรายการ sessions + loading icon + rename, archive/unarchive, permanent delete
-  components/ChatPanel.tsx      # Reusable Chat UI: Markdown/tool collapse, ปุ่ม Abort, status badge + input bar
-  components/TaskTimeline.tsx   # อัปเดตจาก .jsonl + hook events
+apps/web/
+  index.html                    # zero-FOUC theme init script
+  src/styles.css                # semantic light/dark CSS tokens (Tailwind v4)
+  src/lib/i18n/                 # locales/en.ts, I18nProvider, useTranslation() (English-only UI copy)
+  src/lib/theme/                # ThemeProvider (system default | light | dark)
+  src/features/chat/
+    api.ts                      # subscribeSessionEvents, subscribeSessionsListEvents, sendChat, sendInput, updateSession, abortSession, deleteSession
+    hooks/useChat.ts            # sync state จาก SSE stream ของ session แทนการรอ response ราย request
+    hooks/useSessions.ts        # sync รายการ sessions + live status (running/idle/waiting_permission) สำหรับ sidebar
+    layouts/DesktopShell.tsx    # >= 1280px: Multi-pane split layout (Sidebar + Chat + future side panels)
+    layouts/CompactShell.tsx    # < 1280px: Slide-over drawer Sidebar + single-focus Chat/tab view
+    components/WorkspacePage.tsx# ถือ shared state (useSessions + useChat) + resource route /sessions/:id
+    components/SessionSidebar.tsx # แสดงรายการ sessions + loading icon + rename, archive/unarchive, permanent delete
+    components/ChatPanel.tsx    # Reusable Chat UI: Markdown/tool collapse, ปุ่ม Abort, status badge + input bar
+    components/TaskTimeline.tsx # อัปเดตจาก .jsonl + hook events
 
 plugins/web/
   hooks/hooks.json              # hook config (หรือ script ส่งต่อ event เข้า local API เมื่อ WEB_PORT ถูกตั้งไว้)

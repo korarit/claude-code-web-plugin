@@ -97,14 +97,17 @@
 - `scripts/hook-forwarder.sh`: อ่าน stdin JSON จาก Claude Code Hook, อ่าน port/token จาก `CLAUDE_WEB_PORT` หรือ `~/.harness-web/runtime.json`, ถ้ามี server รันอยู่ให้ `curl -sS -m 1 -X POST http://127.0.0.1:${PORT}/api/chat/hooks ...` และ **ต้อง exit 0 เสมอ** แม้ server ปิดอยู่
 - `hooks/hooks.json` (หรือ config snippet ใน plugin): ลงทะเบียน hooks ที่จำเป็น
 
-### 3.7 `apps/web/src/features/chat/` (ตามกติกา Option 3 ใน [roadmap.md](./roadmap.md))
-- `api.ts`: เพิ่ม `subscribeSessionEvents`, `subscribeSessionsListEvents`, `updateSession`, `abortSession`, `deleteSession`
-- `hooks/useChat.ts` + `hooks/useSessions.ts`: แยก action `send()` ออกจาก subscription stream ของ session; sync รายการ session และสถานะแบบ real-time; เมื่อเปิดเว็บใหม่หรือรีเฟรชหน้า ยังโหลดประวัติ + ตาม stream ต่อได้
+### 3.7 `apps/web/` (ตามกติกา Option 3 + [ui-concept.md](../arc/ui-concept.md))
+- **i18n & Theme Foundation (`apps/web/src/lib/` + `index.html` / `styles.css`):**
+  - `lib/i18n/`: `locales/en.ts` (English-only copy ทั้งหมด), `I18nProvider.tsx`, `useTranslation()` (typed `t(...)`, interpolation) — ห้าม hardcode UI string ใน JSX
+  - `lib/theme/`: `ThemeProvider.tsx` (`"system" | "light" | "dark"`, default `"system"`), inline zero-FOUC script ใน `index.html`, semantic light/dark CSS tokens ใน `styles.css`, และปุ่มสลับ theme บน Top Bar
+- `features/chat/api.ts`: เพิ่ม `subscribeSessionEvents`, `subscribeSessionsListEvents`, `updateSession`, `abortSession`, `deleteSession`
+- `features/chat/hooks/useChat.ts` + `hooks/useSessions.ts`: แยก action `send()` ออกจาก subscription stream ของ session; sync รายการ session และสถานะแบบ real-time; เมื่อเปิดเว็บใหม่หรือรีเฟรชหน้า ยังโหลดประวัติ + ตาม stream ต่อได้
 - **Single Resource Route + Shared State (`WorkspacePage.tsx`):**
   - รองรับ URL `/sessions/:id` (ซิงค์กับ browser history โดยไม่ reload) และถือ `useSessions()` + `useChat()` ไว้ที่ `WorkspacePage` ชั้นเดียว เพื่อไม่ให้ SSE หลุดตอน resize หน้าต่างข้าม `1280px`
 - **2 Responsive Layout Shells (Breakpoint `1280px` / `xl`):**
-  - `layouts/DesktopShell.tsx` (`>= 1280px`): Split View `[SessionSidebar (260px)] | [ChatPanel (flex-1)]`
-  - `layouts/CompactShell.tsx` (`< 1280px`): Header ปุ่มเปิด `SessionSidebar` แบบ Slide-over Drawer + `ChatPanel` เต็มความกว้างจอ
+  - `layouts/DesktopShell.tsx` (`>= 1280px`): Split View `[SessionSidebar (260px)] | [ChatPanel (flex-1)]` + Top Bar (Rename, ContextBar, Theme toggle)
+  - `layouts/CompactShell.tsx` (`< 1280px`): Compact Header ปุ่ม `☰` เปิด `SessionSidebar` แบบ Slide-over Drawer (พร้อมจุดแจ้งเตือนเมื่อมีห้อง background กำลังรัน) + `ChatPanel` เต็มความกว้างจอ
 - `components/SessionSidebar.tsx` (Reusable Panel):
   - แสดงรายการ sessions ทั้งหมดที่เปิดอยู่ (ชื่อที่ตั้งเอง/preview ข้อความแรก, `model` badge, เวลาอัปเดตล่าสุด) และปุ่ม `+ New Session`
   - **Session Actions:** กด **Rename** (inline edit), **Archive / Unarchive** (ส่วน `Archived` พับเก็บได้ด้านล่าง), และ **Delete Permanently** (พร้อม confirm modal กันกดพลาด)
@@ -131,4 +134,5 @@
    - ทดสอบ Abort, Rename, Archive & Permanent Delete: กด Stop (`Ctrl+C`) หยุดงานได้, Rename แล้วชื่อจำอยู่หลัง restart, Archive ย้ายไปส่วน Archived และ unarchive กลับมาได้, และ Delete ถาวรปิด `tmux` พร้อมลบออกจาก `sessions.json` สะอาด
    - ทดสอบเปิด 2 sessions พร้อมกัน: สั่งงาน Session A แล้วกดสลับไปดู Session B → **Session Sidebar** แสดง **loading icon** บน Session A จนกว่าจะทำงานเสร็จ (`Stop` hook → `idle`)
    - ทดสอบ Responsive Layout (`>= 1280px` ↔ `< 1280px`): ย่อขยายหน้าต่างข้าม `1280px` ระหว่างที่ session กำลัง streaming → สลับจาก `DesktopShell` เป็น `CompactShell` (drawer sidebar) ได้โดย **SSE stream และ draft ข้อความไม่หลุด**
+   - ทดสอบ Theme & i18n: default ตาม OS `prefers-color-scheme`, สลับ `System` / `Light` / `Dark` แล้วไม่กระพริบหลังรีเฟรช, ข้อความ UI ทั้งหมดเป็นภาษาอังกฤษผ่าน `locales/en.ts`
 4. `hook-forwarder.sh` เมื่อ server ปิดอยู่ต้องจบด้วย exit code `0` ภายใน `< 200ms`

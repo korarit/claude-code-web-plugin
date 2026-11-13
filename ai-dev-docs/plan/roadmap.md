@@ -50,7 +50,9 @@ Phase 4 (Multi-Agent + Git Worktree)     Phase 5 (3 Harness Adapters: claude / a
 
 ---
 
-## Frontend Architecture Rule (บังคับใช้ทุก Phase — Option 3)
+## Frontend Architecture Rule (บังคับใช้ทุก Phase — Option 3 + UI Concept)
+
+> สเปคหน้าตา, โทนสี, i18n และ layout เต็มดูที่ [ui-concept.md](../arc/ui-concept.md)
 
 เพื่อรองรับทั้ง **Mobile / Compact (`width < 1280px`)** และ **Desktop (`width >= 1280px`)** โดยไม่ให้ SSE stream หรือ state หลุดเมื่อปรับขนาดหน้าจอ:
 
@@ -61,4 +63,8 @@ Phase 4 (Multi-Agent + Git Worktree)     Phase 5 (3 Harness Adapters: claude / a
 3. **Reusable Feature Panels + 2 Responsive Layout Shells (`1280px` = Tailwind `xl`):**
    - ไส้ใน (`SessionSidebar`, `ChatPanel`, `ChangesPanel`, `TerminalPanel`, `AgentBoard`) เขียนชุดเดียวรับ props จาก state กลาง
    - **`DesktopShell` (`>= 1280px`):** Multi-pane Split View (`[SessionSidebar 260px] | [Chat / Subagent flex-1] | [ChangesDiff / Terminal resizable]`)
-   - **`CompactShell` (`< 1280px`):** Single-Focus View + Header เปิด **`SessionSidebar` แบบ Slide-over Drawer** + Tab / Bottom Switcher สลับเต็มจอทีละ view (`Chat` | `Changes` | `Agents` | `Terminal`)
+   - **`CompactShell` (`< 1280px`):** Single-Focus View + Header เปิด **`SessionSidebar` แบบ Slide-over Drawer** + Bottom Bar / Tab Switcher สลับเต็มจอทีละ view (`Chat` | `Changes` | `Agents` | `Terminal`)
+4. **English-Only UI + Type-Safe i18n:**
+   - ข้อความบน UI เป็น **ภาษาอังกฤษล้วน** และห้าม hardcode string ใน component — เรียกผ่าน `useTranslation()` (`locales/en.ts`) เสมอเพื่อรองรับการเพิ่มภาษาในอนาคตแบบ type-safe
+5. **Dark / Light Theme (Default = System):**
+   - รองรับ 3 โหมด (`system` default | `light` | `dark`) ใช้ semantic CSS variables + zero-FOUC inline script ใน `index.html` ตาม theme เครื่องอัตโนมัติ
