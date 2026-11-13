@@ -105,8 +105,11 @@ apps/web/src/features/chat/
   api.ts                        # subscribeSessionEvents, subscribeSessionsListEvents, sendChat, sendInput, updateSession, abortSession, deleteSession
   hooks/useChat.ts              # sync state จาก SSE stream ของ session แทนการรอ response ราย request
   hooks/useSessions.ts          # sync รายการ sessions + live status (running/idle/waiting_permission) สำหรับ sidebar
+  layouts/DesktopShell.tsx      # >= 1280px: Multi-pane split layout (Sidebar + Chat + future side panels)
+  layouts/CompactShell.tsx      # < 1280px: Slide-over drawer Sidebar + single-focus Chat/tab view
+  components/WorkspacePage.tsx  # ถือ shared state (useSessions + useChat) + resource route /sessions/:id
   components/SessionSidebar.tsx # แสดงรายการ sessions + loading icon + rename, archive/unarchive, permanent delete
-  components/ChatView.tsx       # Sidebar + Chat, Markdown/tool collapse, ปุ่ม Abort, status badge + input bar
+  components/ChatPanel.tsx      # Reusable Chat UI: Markdown/tool collapse, ปุ่ม Abort, status badge + input bar
   components/TaskTimeline.tsx   # อัปเดตจาก .jsonl + hook events
 
 plugins/web/

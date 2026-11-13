@@ -13,8 +13,11 @@
 
 ### 2.1 UI Component System (`apps/web`)
 - ติดตั้งและตั้งค่า **shadcn/ui** (`components.json`, `src/lib/utils.ts` `cn()`, `src/components/ui/*`) ตาม [code-structure.md](../code-structure.md)
-- Refactor components ใน `features/chat` (Dialogs, Command Palette `Cmd+K` สำหรับสลับ session/model/harness, Tabs, Badges, Resizable Split Panels สำหรับ Chat + Changes Diff + Terminal)
-- ปรับปรุง accessibility, keyboard shortcuts, และ responsive layout
+- Refactor components ใน `features/chat` (Dialogs, Command Palette `Cmd+K` สำหรับสลับ session/model/harness, Tabs, Badges)
+- ปรับปรุง 2 Layout Shells (Breakpoint `1280px` ตาม [roadmap.md](./roadmap.md)):
+  - `DesktopShell` (`>= 1280px`): ใช้ `Resizable` split panels สำหรับ `SessionSidebar` + `ChatPanel` + `ChangesPanel` / `TerminalPanel`
+  - `CompactShell` (`< 1280px`): ใช้ `Sheet` (slide-over drawer) สำหรับ `SessionSidebar` + `Tabs` / bottom bar สำหรับสลับ `Chat` | `Changes` | `Agents` | `Terminal` เต็มจอ
+- ปรับปรุง accessibility และ keyboard shortcuts
 
 ### 2.2 Automated Boundary & Code Quality Guardrails
 - เพิ่ม `eslint-plugin-boundaries` (หรือ custom dependency check script ใน Bun) บังคับกฎใน [code-structure.md](../code-structure.md):

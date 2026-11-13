@@ -26,11 +26,12 @@
 - **Subagent Tree ใน `SessionSidebar`:**
   - แสดงรายการลูก (`↳ Codebase Researcher`, `↳ Test Runner`) แบบ Tree ใต้ Session แม่ทันทีเมื่อมีการ spawn subagent
   - แสดง **loading spinner icon** แยกต่อ subagent ตัวที่กำลังรันอยู่ (`done ✓` เมื่อจบ)
-- **Subagent Drill-Down & Switch Back to Main:**
-  - คลิก subagent จาก Tree ใน Sidebar หรือจาก Agent Card เพื่อ **สลับหน้าแชทเข้าไปอ่านการทำงานของ subagent ตัวนั้นแบบ real-time** (เห็น thinking, tool calls, ผลลัพธ์ทั้งหมดของตัวลูก; แสดง banner `Read-only Inspector` สำหรับ subagent ที่ถูกคุมโดยตัวแม่)
-  - มีปุ่ม **`← Back to Main`** (หรือคลิกตัวแม่ใน Sidebar) เพื่อสลับกลับมาหน้า Main Session ได้ทันทีโดยไม่ขัดจังหวะการทำงานของทั้ง Main และ Subagent
-- **Agent Swimlanes / Grid View:**
+- **Subagent Drill-Down & Switch Back to Main (URL Resource Route):**
+  - คลิก subagent จาก Tree ใน Sidebar หรือจาก Agent Card เพื่อเปลี่ยน resource URL เป็น `/sessions/:id/agents/:agentId` และ **สลับหน้าแชทเข้าไปอ่านการทำงานของ subagent ตัวนั้นแบบ real-time** (เห็น thinking, tool calls, ผลลัพธ์ทั้งหมดของตัวลูก; แสดง banner `Read-only Inspector` สำหรับ subagent ที่ถูกคุมโดยตัวแม่)
+  - มีปุ่ม **`← Back to Main`** (หรือกด Back บน browser / คลิกตัวแม่ใน Sidebar) เพื่อสลับกลับมา `/sessions/:id` ได้ทันทีโดยไม่ขัดจังหวะการทำงานของทั้ง Main และ Subagent
+- **Agent Swimlanes / Grid View (`AgentBoard`):**
   - การ์ดต่อ 1 agent แสดงสถานะปัจจุบัน, tool ล่าสุด, token ที่ใช้, และ mini-log ของ agent ตัวนั้น
+  - จัดวางบน `DesktopShell` (`>= 1280px`) เป็น Split/Modal View และบน `CompactShell` (`< 1280px`) เป็น Tab `Agents` เต็มจอ (single-column cards)
 - **Task Board Sync:**
   - แสดง Shared Task List (`TodoWrite` + `~/.claude/tasks/`) แบบ Kanban/Checklist sync ตาม real-time
 - **Visual Activity View (Optional / Toggleable):**

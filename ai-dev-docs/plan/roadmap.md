@@ -47,3 +47,18 @@ Phase 4 (Multi-Agent + Git Worktree)     Phase 5 (3 Harness Adapters: claude / a
                       ▼
                 Phase 7 (shadcn/ui + Boundary Lint + Packaging)
 ```
+
+---
+
+## Frontend Architecture Rule (บังคับใช้ทุก Phase — Option 3)
+
+เพื่อรองรับทั้ง **Mobile / Compact (`width < 1280px`)** และ **Desktop (`width >= 1280px`)** โดยไม่ให้ SSE stream หรือ state หลุดเมื่อปรับขนาดหน้าจอ:
+
+1. **Single Resource Route (ห้ามแยก Route ตามขนาดจอ):**
+   - ใช้ URL ตาม Resource เดียวกันทุกอุปกรณ์ (เช่น `/`, `/sessions/:sessionId`, `/sessions/:sessionId/agents/:agentId`) ห้ามสร้าง `/mobile/...` vs `/desktop/...`
+2. **Shared State & Hooks ที่ Root (`WorkspacePage`):**
+   - State ของ `useSessions()`, `useChat()`, `useChanges()` อยู่ที่ `WorkspacePage` ชั้นบนสุดที่เดียว เพื่อให้การ resize ข้ามจุดตัด `1280px` **ไม่ unmount hooks และไม่ตัด SSE connection**
+3. **Reusable Feature Panels + 2 Responsive Layout Shells (`1280px` = Tailwind `xl`):**
+   - ไส้ใน (`SessionSidebar`, `ChatPanel`, `ChangesPanel`, `TerminalPanel`, `AgentBoard`) เขียนชุดเดียวรับ props จาก state กลาง
+   - **`DesktopShell` (`>= 1280px`):** Multi-pane Split View (`[SessionSidebar 260px] | [Chat / Subagent flex-1] | [ChangesDiff / Terminal resizable]`)
+   - **`CompactShell` (`< 1280px`):** Single-Focus View + Header เปิด **`SessionSidebar` แบบ Slide-over Drawer** + Tab / Bottom Switcher สลับเต็มจอทีละ view (`Chat` | `Changes` | `Agents` | `Terminal`)

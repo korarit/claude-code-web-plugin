@@ -38,7 +38,9 @@
 
 ### 2.3 Optional Live Terminal Drawer (Hybrid `tmux` + PTY Attach)
 - **Backend:** เพิ่ม WebSocket endpoint `/api/chat/sessions/:id/terminal` ที่ spawn `tmux attach-session -t <name>` ผ่าน PTY (หรือ fallback เป็น `tmux capture-pane` polling ถ้าเครื่องไม่มี PTY support)
-- **Frontend:** ปุ่มเปิด Terminal Drawer (`xterm.js`) สำหรับดู TUI สดๆ หรือกดปุ่ม copy คำสั่ง `tmux attach -t <name>` ไปเปิดใน terminal ของเครื่อง
+- **Frontend (`TerminalPanel` ตาม Option 3 Layout Rule):**
+  - `DesktopShell` (`>= 1280px`): เปิดเป็น Split / Bottom Drawer ข้างหรือใต้ `ChatPanel`
+  - `CompactShell` (`< 1280px`): สลับเป็น Tab `Terminal` เต็มจอเพื่อให้พิมพ์/ดูจอ TUI (`xterm.js`) บนจอแคบได้ชัดเจน พร้อมปุ่ม copy คำสั่ง `tmux attach -t <name>`
 
 ### 2.4 Auth Mode & Anti-Ban Safety Guardrails
 - **Contracts & UI:**

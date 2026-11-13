@@ -38,14 +38,16 @@
   - `GET /api/chat/sessions/:id/files/raw?path=<relPath>` → อ่านไฟล์เต็มสำหรับ Code Preview
   - `POST /api/chat/sessions/:id/changes/revert` → ย้อนเฉพาะไฟล์กลับไปที่ before-snapshot ของ session (หรือ `git checkout -- <path>`) พร้อมตรวจ path safety
 
-### 3.3 Frontend (`apps/web`)
-- **`ChangesDrawer` / Split Panel (Right-side Drawer หรือ Tab `Changes (N)`):**
+### 3.3 Frontend (`apps/web` — Reusable `ChangesPanel` สำหรับทั้ง 2 Layout Shells)
+- **`ChangesPanel` (ตาม Option 3 Breakpoint `1280px`):**
+  - **`DesktopShell` (`>= 1280px`):** เปิดเป็น Right Split Drawer ข้าง `ChatPanel` (รองรับทั้ง Unified Diff และ Side-by-Side Diff)
+  - **`CompactShell` (`< 1280px`):** สลับเป็น Tab `Changes (N)` เต็มจอ (default เป็น Unified Diff เพื่อให้อ่านบนมือถือ/จอแคบได้ชัดเจน ไม่ล้นข้าง)
   - แสดงรายชื่อไฟล์ที่เปลี่ยนพร้อม badge (`M`, `A`, `D`, `R`), ตัวเลข `+N / -M`, และ **Attribution Badge (`harnessId · model`)** เช่น `claude · sonnet` (ถ้าหลายโมเดล/harness แก้ไฟล์เดียวกันให้แสดง count/list ของผู้แก้ทั้งหมด)
   - Filter รายการไฟล์ตาม `harnessId` / `model` / `agentId` ได้
   - Toggle สลับโหมดดู **Session Changes** (เฉพาะไฟล์ที่ session นี้แก้) กับ **All Git Changes** (`git status`/`git diff`)
   - **Diff Viewer:** เลือกดูแบบ **Cumulative Diff** หรือ **Per-Revision Diff** (เฉพาะรอบที่ model/harness ตัวนั้นแก้), สลับ **Unified Diff** กับ **Side-by-Side Diff** พร้อม syntax highlighting, line numbers, ปุ่ม Copy path/code, ปุ่ม View Full File และปุ่ม Revert (มี confirm modal)
-- **Inline File Pills ใน `ChatView.tsx`:**
-  - ข้อความ/tool block ที่แก้ไฟล์ (เช่น `Edited src/app.ts (+12 -3) · sonnet`) คลิกแล้วเปิด `ChangesDrawer` กระโดดไปไฟล์/revision นั้นทันที
+- **Inline File Pills ใน `ChatPanel`:**
+  - ข้อความ/tool block ที่แก้ไฟล์ (เช่น `Edited src/app.ts (+12 -3) · sonnet`) คลิกแล้วเปิด `ChangesPanel` (เปิด drawer บน `>= 1280px` หรือสลับไป tab `Changes` บน `< 1280px`) กระโดดไปไฟล์/revision นั้นทันที
 
 ## 4. Exit Criteria / Verification
 
