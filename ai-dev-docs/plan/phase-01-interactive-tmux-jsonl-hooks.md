@@ -1,6 +1,6 @@
 # Phase 1: Interactive `tmux` Runner + `.jsonl` Watcher + Hooks
 
-> **Status:** 🚧 Next  
+> **Status:** ✅ Done  
 > **Parent Plan:** [roadmap.md](./roadmap.md)  
 > **Feature Doc:** [20261113-interactive-tmux-jsonl-runner.md](../feature/20261113-interactive-tmux-jsonl-runner.md)  
 > **Depends On:** [Phase 0](./phase-00-monorepo-and-v1-spike.md)
