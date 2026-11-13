@@ -6,16 +6,6 @@ export class UnknownHarnessError extends AppError {
   }
 }
 
-export class HarnessNotAvailableError extends AppError {
-  constructor(harnessId: string, binary: string) {
-    super(
-      "CONFLICT",
-      `Harness '${harnessId}' is not available on this machine (missing '${binary}' binary).`,
-      409,
-    );
-  }
-}
-
 export class HarnessSpawnError extends AppError {
   constructor(harnessId: string, message: string) {
     super("INTERNAL", `${harnessId}: ${message}`, 500);

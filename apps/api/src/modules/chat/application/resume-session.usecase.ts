@@ -66,7 +66,7 @@ export class ResumeSessionUsecase {
     const cwd = existing.cwd || this.runtime.defaultCwd;
     const resumeId = existing.externalSessionId ?? existing.id;
 
-    let tmuxSession = existing.tmuxSession;
+    let tmuxSession: string | undefined;
     let externalSessionId = existing.externalSessionId;
     let transcriptPath = existing.transcriptPath;
 

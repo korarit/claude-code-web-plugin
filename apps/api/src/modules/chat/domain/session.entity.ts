@@ -95,14 +95,6 @@ export function markIdle(session: Session, clock: Clock): Session {
   };
 }
 
-export function markWaitingPermission(session: Session, clock: Clock): Session {
-  return {
-    ...session,
-    status: "waiting_permission",
-    updatedAt: isoNow(clock),
-  };
-}
-
 export function markStopped(session: Session, clock: Clock): Session {
   return {
     ...session,

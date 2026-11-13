@@ -22,12 +22,6 @@ export class SessionNotFoundError extends AppError {
   }
 }
 
-export class InteractionNotFoundError extends AppError {
-  constructor(sessionId: string) {
-    super("NOT_FOUND", `no pending interaction found for session ${sessionId}`, 404);
-  }
-}
-
 export class SessionBusyError extends AppError {
   constructor(id: string, status: string) {
     super("CONFLICT", `session ${id} is currently ${status}`, 409);

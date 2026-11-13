@@ -221,7 +221,7 @@ export class RecordToolChangeUsecase {
     // Determine baseline bytes for cumulative session diff.
     let baselineKey = existing?.baselineKey;
     let baselineMissing = existing?.baselineMissing;
-    let baselineBytes: Uint8Array | null = null;
+    let baselineBytes: Uint8Array | null;
 
     if (existing) {
       baselineBytes = existing.baselineMissing

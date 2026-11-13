@@ -15,29 +15,6 @@ export interface KeystrokeStep {
   text?: string;
 }
 
-export const ALLOWED_TMUX_KEYS = new Set([
-  "Up",
-  "Down",
-  "Left",
-  "Right",
-  "Enter",
-  "Escape",
-  "Space",
-  "Tab",
-  "BTab",
-  "BSpace",
-  "C-c",
-  "C-d",
-  "C-l",
-  "y",
-  "n",
-  "1",
-  "2",
-  "3",
-  "4",
-  "5",
-]);
-
 export function buildTuiQuestionKeystrokes(
   questions: QuestionItem[],
   rawValue: ChatInputRequest["value"],

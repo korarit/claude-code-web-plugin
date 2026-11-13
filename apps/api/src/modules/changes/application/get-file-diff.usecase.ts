@@ -60,8 +60,8 @@ export class GetFileDiffUsecase {
       return err(new ChangeNotFoundError(`No tracked changes for ${resolved.relPath} in session`));
     }
 
-    let originalBytes: Uint8Array | null = null;
-    let modifiedBytes: Uint8Array | null = null;
+    let originalBytes: Uint8Array | null;
+    let modifiedBytes: Uint8Array | null;
     let editedBy: FileEditAttribution | undefined = record.lastEditedBy;
     let status: FileChangeStatus = record.status;
 

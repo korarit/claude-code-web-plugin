@@ -1,9 +1,12 @@
+import type { SessionControlMode, SessionOrigin } from "@contracts/chat";
 import type { HarnessId } from "@contracts/harness";
 import type { CanonicalSyncService, PreparedSyncPayload } from "./canonical-sync.service.ts";
 
 export interface PreparePromptSyncInput {
   sessionId: string;
   harnessId: HarnessId;
+  origin?: SessionOrigin;
+  controlMode?: SessionControlMode;
   model: string;
   prompt: string;
   cwd?: string;
@@ -26,6 +29,8 @@ export class SendWithSyncUsecase {
       session: {
         sessionId: input.sessionId,
         harnessId: input.harnessId,
+        origin: input.origin,
+        controlMode: input.controlMode,
         cwd: input.cwd,
         title: input.title,
         model: input.model,

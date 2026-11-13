@@ -61,6 +61,7 @@ import { harnessRoutes } from "./modules/harness/presentation/harness.routes.ts"
 import {
   CanonicalSyncService,
   ExternalSessionIngestService,
+  SendWithSyncUsecase,
   SwitchHarnessUsecase,
   type OpenCodeNativeImporterPort,
   type SyncEventPublisherPort,
@@ -313,6 +314,7 @@ export function createApp(options: CreateAppOptions = {}) {
     },
     opencodeImporter,
   );
+  const sendWithSync = new SendWithSyncUsecase(canonicalSyncService);
   const syncHarnessPort: SyncHarnessGatewayPort = {
     isAvailable: (harnessId) => harnessGateway.isAvailable(harnessId),
     getDefaultModel: (harnessId) => harnessGateway.getDefaultModel(harnessId),
@@ -373,23 +375,20 @@ export function createApp(options: CreateAppOptions = {}) {
       await externalIngest.ingestSession(session, preloadedEvents);
     },
     preparePromptForSend: (session, prompt, model) =>
-      canonicalSyncService.preparePromptForSend({
-        session: {
-          sessionId: session.id,
-          harnessId: session.harnessId,
-          origin: session.origin,
-          controlMode: session.controlMode,
-          cwd: session.cwd,
-          title: session.title,
-          model,
-          externalSessionId: session.externalSessionId,
-          tmuxSession: session.tmuxSession,
-          transcriptPath: session.transcriptPath,
-        },
-        prompt,
+      sendWithSync.prepare({
+        sessionId: session.id,
+        harnessId: session.harnessId,
+        origin: session.origin,
+        controlMode: session.controlMode,
+        cwd: session.cwd,
+        title: session.title,
         model,
+        prompt,
+        externalSessionId: session.externalSessionId,
+        tmuxSession: session.tmuxSession,
+        transcriptPath: session.transcriptPath,
       }),
-    commitPromptSent: (params) => canonicalSyncService.commitPromptSent(params),
+    commitPromptSent: (params) => sendWithSync.commit(params),
     updateBinding: (sessionId, harnessId, meta) => {
       canonicalSyncService.updateBinding(sessionId, harnessId, meta);
     },
