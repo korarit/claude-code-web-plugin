@@ -380,6 +380,7 @@ export default function WorkspacePage() {
       concurrencyWarning={isSubagentView ? null : chat.concurrencyWarning}
       submittingInteraction={chat.submittingInteraction}
       resuming={chat.resuming}
+      switchingHarness={chat.switchingHarness}
       uploadingImage={chat.uploadingImage}
       sending={chat.sending}
       error={isSubagentView ? (agentStream.error ?? chat.error) : chat.error}
@@ -388,6 +389,7 @@ export default function WorkspacePage() {
       onSubmitDecision={(d) => void chat.submitDecision(d)}
       onSubmitQuestion={(a) => void chat.submitQuestion(a)}
       onContinueInWeb={() => void chat.continueInWeb()}
+      onSwitchHarness={(nextHarnessId) => void chat.switchHarness(nextHarnessId)}
       onUploadImage={(file) => void chat.uploadImage(file)}
       onOpenTerminal={handleOpenTerminal}
       changesFiles={changes.files}

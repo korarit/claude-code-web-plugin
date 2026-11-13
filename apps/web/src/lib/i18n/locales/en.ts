@@ -202,6 +202,15 @@ export const en = {
   harnessOpencode: "OpenCode",
   harnessUnavailable: "{{name}} CLI not found in PATH",
   harnessPickerHint: "Choose runtime harness for this new session",
+  switchHarnessLabel: "Harness",
+  switchingHarness: "Switching...",
+  syncStatusSynced: "Synced",
+  syncStatusPending: "Pending sync · {{count}} turns",
+  syncStatusPendingRange: "Pending sync · #{{from}}–#{{to}}",
+  syncLargeContextBadge: "Large context — using File Sync",
+  syncFileSavedHint: "Full verbatim transcript saved at {{path}}",
+  harnessSwitchedDivider: "Switched: {{from}} → {{to}}",
+  harnessSwitchedWithRange: "Switched: {{from}} → {{to}} · synced turns #{{fromSeq}}–#{{toSeq}}",
 } as const;
 
 export type TranslationMessages = typeof en;

@@ -37,6 +37,11 @@ import type {
   HarnessesListResponse,
   HarnessId,
 } from "@contracts/harness";
+import type {
+  CanonicalSessionResponse,
+  SwitchHarnessRequest,
+  SwitchHarnessResponse,
+} from "@contracts/sync";
 import { safeJsonParse } from "@core/utils";
 
 export interface HealthInfo {
@@ -161,6 +166,34 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await parseApiJson<{ deleted: boolean; id: string }>(res);
 }
 
+export async function switchSessionHarness(
+  sessionId: string,
+  req: SwitchHarnessRequest,
+): Promise<SwitchHarnessResponse> {
+  const res = await fetch(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/switch-harness`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(req),
+    },
+  );
+  return parseApiJson<SwitchHarnessResponse>(res);
+}
+
+export async function fetchCanonicalSession(
+  sessionId: string,
+  limit?: number,
+): Promise<CanonicalSessionResponse> {
+  const params = new URLSearchParams();
+  if (limit) params.set("limit", String(limit));
+  const qs = params.toString();
+  const res = await fetch(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/canonical${qs ? `?${qs}` : ""}`,
+  );
+  return parseApiJson<CanonicalSessionResponse>(res);
+}
+
 export async function fetchWorkspaceFiles(
   cwd?: string,
   q?: string,
@@ -203,6 +236,7 @@ const CHAT_EVENT_TYPES = [
   "file_changed",
   "agent_updated",
   "tasks_updated",
+  "harness_switched",
 ] as const;
 
 export function subscribeSessionEvents(

@@ -13,6 +13,7 @@ import type {
   SessionStatus,
 } from "@contracts/chat";
 import type { HarnessDescriptor, HarnessId } from "@contracts/harness";
+import type { SyncStrategy, SyncedTurnsRange } from "@contracts/sync";
 import { newMessageId } from "@core/ids";
 import {
   abortSession,
@@ -20,6 +21,7 @@ import {
   sendChat,
   sendInput,
   subscribeSessionEvents,
+  switchSessionHarness,
   uploadChatImage,
 } from "../api.ts";
 
@@ -33,9 +35,16 @@ export interface ToolBlock {
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant";
+  kind?: "message" | "harness_switched";
+  role: "user" | "assistant" | "system";
   text: string;
   tools?: ToolBlock[];
+  harnessId?: HarnessId;
+  model?: string;
+  switchedFrom?: HarnessId;
+  switchedTo?: HarnessId;
+  syncedTurnsRange?: SyncedTurnsRange;
+  syncStrategy?: SyncStrategy;
   timestamp?: string;
 }
 
@@ -102,6 +111,7 @@ export function useChat({
   const [concurrencyWarning, setConcurrencyWarning] = useState<ConcurrencyWarning | null>(null);
   const [submittingInteraction, setSubmittingInteraction] = useState(false);
   const [resuming, setResuming] = useState(false);
+  const [switchingHarness, setSwitchingHarness] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -241,8 +251,38 @@ export function useChat({
                 ...prev,
                 {
                   id: event.id ?? newMessageId(),
+                  kind: "message",
                   role: "user",
                   text,
+                  harnessId: event.harnessId,
+                  model: event.model,
+                  syncedTurnsRange: event.syncedTurnsRange,
+                  syncStrategy: event.syncStrategy,
+                  timestamp: event.timestamp,
+                },
+              ];
+            });
+          }
+          break;
+
+        case "harness_switched":
+          if (event.switchedFrom && event.switchedTo) {
+            setMessages((prev) => {
+              const id = event.id ?? `switch-${event.canonicalSeq ?? Date.now()}`;
+              if (prev.some((m) => m.id === id)) return prev;
+              return [
+                ...prev,
+                {
+                  id,
+                  kind: "harness_switched",
+                  role: "system",
+                  text: event.text ?? "",
+                  harnessId: event.switchedTo,
+                  model: event.model,
+                  switchedFrom: event.switchedFrom,
+                  switchedTo: event.switchedTo,
+                  syncedTurnsRange: event.syncedTurnsRange,
+                  syncStrategy: event.syncStrategy,
                   timestamp: event.timestamp,
                 },
               ];
@@ -255,17 +295,33 @@ export function useChat({
             const text = event.text;
             setMessages((prev) => {
               const last = prev[prev.length - 1];
-              if (last && last.role === "assistant") {
+              if (
+                last &&
+                last.kind !== "harness_switched" &&
+                last.role === "assistant" &&
+                (!last.harnessId || !event.harnessId || last.harnessId === event.harnessId)
+              ) {
                 if (last.text === text) return prev;
                 const nextText = last.text ? `${last.text}\n\n${text}` : text;
-                return [...prev.slice(0, -1), { ...last, text: nextText }];
+                return [
+                  ...prev.slice(0, -1),
+                  {
+                    ...last,
+                    text: nextText,
+                    harnessId: last.harnessId ?? event.harnessId,
+                    model: last.model ?? event.model,
+                  },
+                ];
               }
               return [
                 ...prev,
                 {
                   id: event.id ?? newMessageId(),
+                  kind: "message",
                   role: "assistant",
                   text,
+                  harnessId: event.harnessId,
+                  model: event.model,
                   timestamp: event.timestamp,
                 },
               ];
@@ -297,19 +353,35 @@ export function useChat({
 
           setMessages((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === "assistant") {
+            if (
+              last &&
+              last.kind !== "harness_switched" &&
+              last.role === "assistant" &&
+              (!last.harnessId || !event.harnessId || last.harnessId === event.harnessId)
+            ) {
               const existingTools = last.tools ?? [];
               if (existingTools.some((t) => t.id === block.id && t.summary === block.summary)) {
                 return prev;
               }
-              return [...prev.slice(0, -1), { ...last, tools: [...existingTools, block] }];
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...last,
+                  harnessId: last.harnessId ?? event.harnessId,
+                  model: last.model ?? event.model,
+                  tools: [...existingTools, block],
+                },
+              ];
             }
             return [
               ...prev,
               {
                 id: newMessageId(),
+                kind: "message",
                 role: "assistant",
                 text: "",
+                harnessId: event.harnessId,
+                model: event.model,
                 tools: [block],
                 timestamp: event.timestamp,
               },
@@ -523,6 +595,29 @@ export function useChat({
     [activeSessionId, onSessionUpdated, pendingInteraction?.id],
   );
 
+  const switchHarness = useCallback(
+    async (targetHarnessId: HarnessId, targetModel?: ModelId) => {
+      if (!activeSessionId || targetHarnessId === activeSession?.harnessId) return;
+      setError(null);
+      setSwitchingHarness(true);
+      try {
+        const res = await switchSessionHarness(activeSessionId, {
+          harnessId: targetHarnessId,
+          model: targetModel,
+        });
+        setHarnessId(res.session.harnessId);
+        setModel(res.session.model);
+        setStatus(res.session.status);
+        onSessionUpdated?.(res.session);
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setSwitchingHarness(false);
+      }
+    },
+    [activeSession?.harnessId, activeSessionId, onSessionUpdated],
+  );
+
   const continueInWeb = useCallback(async () => {
     if (!activeSessionId) return;
     setError(null);
@@ -600,6 +695,7 @@ export function useChat({
     concurrencyWarning,
     submittingInteraction,
     resuming,
+    switchingHarness,
     uploadingImage,
     sending,
     error,
@@ -608,6 +704,7 @@ export function useChat({
     submitDecision,
     submitQuestion,
     continueInWeb,
+    switchHarness,
     uploadImage,
   };
 }

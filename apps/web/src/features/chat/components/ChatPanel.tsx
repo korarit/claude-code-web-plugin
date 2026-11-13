@@ -20,7 +20,7 @@ import { getAgentStateMeta } from "../agentStateMeta.ts";
 import { fetchWorkspaceFiles } from "../api.ts";
 import type { ChatMessage, TaskEntry, UsageState } from "../hooks/useChat.ts";
 import ContextBar from "./ContextBar.tsx";
-import HarnessBadge from "./HarnessBadge.tsx";
+import HarnessBadge, { getHarnessLabelKey } from "./HarnessBadge.tsx";
 import HarnessPicker from "./HarnessPicker.tsx";
 import InteractionCard from "./InteractionCard.tsx";
 import MarkdownContent from "./MarkdownContent.tsx";
@@ -56,6 +56,7 @@ export interface ChatPanelProps {
   concurrencyWarning: ConcurrencyWarning | null;
   submittingInteraction: boolean;
   resuming: boolean;
+  switchingHarness?: boolean;
   uploadingImage: boolean;
   sending: boolean;
   error: string | null;
@@ -64,6 +65,7 @@ export interface ChatPanelProps {
   onSubmitDecision: (decision: PermissionDecision) => void;
   onSubmitQuestion: (answers: Record<string, string | string[]>) => void;
   onContinueInWeb: () => void;
+  onSwitchHarness?: (harnessId: HarnessId) => void;
   onUploadImage: (file: File) => void;
   onOpenTerminal?: () => void;
   changesFiles?: SessionFileChange[];
@@ -102,6 +104,7 @@ export default function ChatPanel({
   concurrencyWarning,
   submittingInteraction,
   resuming,
+  switchingHarness = false,
   uploadingImage,
   sending,
   error,
@@ -110,6 +113,7 @@ export default function ChatPanel({
   onSubmitDecision,
   onSubmitQuestion,
   onContinueInWeb,
+  onSwitchHarness,
   onUploadImage,
   onOpenTerminal,
   changesFiles,
@@ -371,33 +375,65 @@ export default function ChatPanel({
             )}
           </div>
         ) : (
-          messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`rounded-lg border px-3.5 py-2.5 ${
-                msg.role === "user"
-                  ? "border-[var(--border-strong)] bg-[var(--bg-elevated)]"
-                  : "border-[var(--border-subtle)] bg-[var(--bg-surface)]"
-              }`}
-            >
-              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                {msg.role === "user" ? t("roleUser") : t("roleAssistant")}
-              </div>
-              {msg.text && <MarkdownContent text={msg.text} />}
-              {msg.tools && msg.tools.length > 0 && (
-                <div className="mt-2 space-y-1.5">
-                  {msg.tools.map((tool) => (
-                    <ToolCallBlock
-                      key={tool.id}
-                      block={tool}
-                      changesFiles={changesFiles}
-                      onInspectFileChange={onInspectFileChange}
-                    />
-                  ))}
+          messages.map((msg) => {
+            if (msg.kind === "harness_switched" && msg.switchedFrom && msg.switchedTo) {
+              const fromName = t(getHarnessLabelKey(msg.switchedFrom));
+              const toName = t(getHarnessLabelKey(msg.switchedTo));
+              const label = msg.syncedTurnsRange
+                ? t("harnessSwitchedWithRange", {
+                    from: fromName,
+                    to: toName,
+                    fromSeq: msg.syncedTurnsRange.fromSeq,
+                    toSeq: msg.syncedTurnsRange.toSeq,
+                  })
+                : t("harnessSwitchedDivider", { from: fromName, to: toName });
+              return (
+                <div key={msg.id} className="flex items-center gap-2 py-1">
+                  <div className="h-px flex-1 bg-[var(--border-subtle)]" />
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
+                    <span>{label}</span>
+                  </span>
+                  <div className="h-px flex-1 bg-[var(--border-subtle)]" />
                 </div>
-              )}
-            </div>
-          ))
+              );
+            }
+
+            return (
+              <div
+                key={msg.id}
+                className={`rounded-lg border px-3.5 py-2.5 ${
+                  msg.role === "user"
+                    ? "border-[var(--border-strong)] bg-[var(--bg-elevated)]"
+                    : "border-[var(--border-subtle)] bg-[var(--bg-surface)]"
+                }`}
+              >
+                <div className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                  <span>{msg.role === "user" ? t("roleUser") : t("roleAssistant")}</span>
+                  {msg.role === "assistant" && msg.harnessId && (
+                    <HarnessBadge harnessId={msg.harnessId} compact />
+                  )}
+                  {msg.role === "assistant" && msg.model && (
+                    <span className="font-mono text-[10px] font-normal normal-case text-[var(--text-muted)]">
+                      {msg.model}
+                    </span>
+                  )}
+                </div>
+                {msg.text && <MarkdownContent text={msg.text} />}
+                {msg.tools && msg.tools.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {msg.tools.map((tool) => (
+                      <ToolCallBlock
+                        key={tool.id}
+                        block={tool}
+                        changesFiles={changesFiles}
+                        onInspectFileChange={onInspectFileChange}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
         <div ref={bottomRef} />
       </div>
@@ -572,7 +608,78 @@ export default function ChatPanel({
               </>
             ) : (
               <div className="flex flex-wrap items-center gap-1.5">
-                <HarnessBadge harnessId={activeSession.harnessId} compact />
+                {harnesses.length > 0 && onSwitchHarness ? (
+                  <label className="flex items-center gap-1.5 text-[var(--text-secondary)]">
+                    <span>{t("switchHarnessLabel")}</span>
+                    <select
+                      aria-label={t("switchHarnessLabel")}
+                      value={activeSession.harnessId}
+                      disabled={isBusy || sending || switchingHarness || isReadOnlySubagent}
+                      onChange={(e) => onSwitchHarness(e.target.value as HarnessId)}
+                      className="rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-1 text-xs font-medium text-[var(--text-primary)] outline-none disabled:opacity-50"
+                    >
+                      {harnesses.map((h) => {
+                        const label = t(getHarnessLabelKey(h.id));
+                        return (
+                          <option
+                            key={h.id}
+                            value={h.id}
+                            disabled={!h.available && h.id !== activeSession.harnessId}
+                          >
+                            {switchingHarness && h.id === activeSession.harnessId
+                              ? t("switchingHarness")
+                              : h.available || h.id === activeSession.harnessId
+                                ? label
+                                : `${label} (${t("harnessUnavailable", { name: label })})`}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                ) : (
+                  <HarnessBadge harnessId={activeSession.harnessId} compact />
+                )}
+
+                {activeSession.syncSummary && (
+                  <>
+                    {(activeSession.syncSummary.largeContextWarning ||
+                      activeSession.syncSummary.lastSyncStrategy === "file_sync") && (
+                      <span
+                        title={
+                          activeSession.syncSummary.lastSyncFilePath
+                            ? t("syncFileSavedHint", {
+                                path: activeSession.syncSummary.lastSyncFilePath,
+                              })
+                            : undefined
+                        }
+                        className="rounded border border-amber-500/40 bg-amber-500/12 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-200"
+                      >
+                        {t("syncLargeContextBadge")}
+                      </span>
+                    )}
+                    {activeSession.syncSummary.pendingSyncCount > 0 ? (
+                      <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                        {activeSession.syncSummary.pendingSyncFromSeq !== undefined &&
+                        activeSession.syncSummary.pendingSyncToSeq !== undefined
+                          ? t("syncStatusPendingRange", {
+                              from: activeSession.syncSummary.pendingSyncFromSeq,
+                              to: activeSession.syncSummary.pendingSyncToSeq,
+                            })
+                          : t("syncStatusPending", {
+                              count: activeSession.syncSummary.pendingSyncCount,
+                            })}
+                      </span>
+                    ) : (
+                      (Object.keys(activeSession.syncSummary.bindings).length > 1 ||
+                        activeSession.syncSummary.latestSeq > 0) && (
+                        <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+                          {t("syncStatusSynced")}
+                        </span>
+                      )
+                    )}
+                  </>
+                )}
+
                 <span
                   className={`rounded px-2 py-0.5 text-[11px] font-medium ${
                     effectiveAuthMode === "api_key"
