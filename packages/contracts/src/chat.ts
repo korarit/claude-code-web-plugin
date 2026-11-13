@@ -1,3 +1,4 @@
+import type { AgentNode, TeamTaskItem } from "./agents.ts";
 import type { SessionFileChange } from "./changes.ts";
 
 export type ModelId = "sonnet" | "opus" | "haiku";
@@ -115,7 +116,9 @@ export type ChatEventType =
   | "permission_prompt"
   | "interaction"
   | "interaction_resolved"
-  | "file_changed";
+  | "file_changed"
+  | "agent_updated"
+  | "tasks_updated";
 
 export interface PermissionPromptPayload {
   tool?: string;
@@ -149,18 +152,23 @@ export interface ChatStreamEvent {
   interaction?: PendingInteraction;
   interactionId?: string;
   fileChange?: SessionFileChange;
+  agent?: AgentNode;
+  agents?: AgentNode[];
+  tasks?: TeamTaskItem[];
+  agentId?: string;
   model?: string;
   message?: string;
   timestamp?: string;
 }
 
-export type SessionsListEventType = "snapshot" | "upsert" | "delete";
+export type SessionsListEventType = "snapshot" | "upsert" | "delete" | "agent_updated";
 
 export interface SessionsListEvent {
   type: SessionsListEventType;
   session?: SessionInfo;
   sessionId?: string;
   sessions?: SessionInfo[];
+  agent?: AgentNode;
 }
 
 export interface WorkspaceFileEntry {

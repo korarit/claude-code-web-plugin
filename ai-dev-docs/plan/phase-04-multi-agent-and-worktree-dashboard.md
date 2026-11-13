@@ -1,7 +1,8 @@
 # Phase 4: Multi-Agent Visibility & Worktree Dashboard
 
-> **Status:** 📋 Planned  
+> **Status:** ✅ Done  
 > **Parent Plan:** [roadmap.md](./roadmap.md)  
+> **Feature Doc:** [20261113-multi-agent-and-worktree-dashboard.md](../feature/20261113-multi-agent-and-worktree-dashboard.md)  
 > **Depends On:** [Phase 2](./phase-02-interactive-controls-and-discovery.md), [Phase 3](./phase-03-code-preview-and-file-changes.md)
 
 ## 1. Objective
