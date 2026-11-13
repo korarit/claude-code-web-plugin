@@ -79,6 +79,9 @@ packages/contracts/src/chat.ts
   - เพิ่ม ChatInputRequest (สำหรับตอบ y/n/text เข้า interactive prompt)
   - เพิ่ม SessionInfo fields (tmuxSession?, transcriptPath?, status)
 
+apps/api/src/
+  env.ts                        # bind 127.0.0.1 default + parse port
+  index.ts                      # เขียน/ลบ ~/.harness-web/runtime.json ({port, pid, token}) + static serve
 apps/api/src/modules/chat/
   domain/
     session.entity.ts           # เพิ่ม status + transcriptPath + tmuxSessionName
@@ -86,24 +89,24 @@ apps/api/src/modules/chat/
     repository.port.ts          # ปรับ interface รองรับ lookup by transcriptPath / externalId
     errors.ts                   # เพิ่ม TmuxNotFoundError / SessionBusyError
   application/
-    ports.ts                    # แยก TerminalRunnerPort (start/sendPrompt/sendKey/stop) + TranscriptWatcherPort
+    ports.ts                    # แยก TerminalRunnerPort (start/sendPrompt/sendKey/abort/stop) + TranscriptWatcherPort
     send-message.usecase.ts     # ส่งข้อความเข้า active tmux session (สร้างใหม่ถ้ายังไม่มี)
     handle-hook.usecase.ts      # รับ hook event -> อัปเดต session status & broadcast ให้ subscribers
     index.ts
   infrastructure/
-    tmux-runner.ts              # implement TerminalRunnerPort ด้วย tmux CLI (แทน claude-runner.ts เดิม)
-    jsonl-watcher.ts            # tail ~/.claude/projects/.../*.jsonl แบบ incremental byte offset + mapClaudeLine
-    session.repository.ts       # in-memory + discovery จาก ~/.claude/projects/ และ tmux list-sessions
+    tmux-runner.ts              # implement TerminalRunnerPort ด้วย tmux CLI (--session-id, -e env, abort C-c)
+    jsonl-watcher.ts            # tail ~/.claude/projects/.../*.jsonl แบบ incremental byte offset + usage mapping
+    session.repository.ts       # persistent ~/.harness-web/sessions.json + discovery จาก ~/.claude/projects/ และ tmux
     claude-runner.ts            # (ลบหรือเก็บไว้เป็น fallback/legacy mode ตามการตัดสินใจตอน implement)
   presentation/
-    chat.routes.ts              # เพิ่ม GET /api/chat/sessions/events (sidebar SSE), GET /api/chat/sessions/:id/events (SSE), POST /api/chat/input, POST /api/chat/hooks
+    chat.routes.ts              # เพิ่ม SSE sidebar/session, POST /api/chat/send, /abort, DELETE /sessions/:id, /input, /hooks
 
 apps/web/src/features/chat/
-  api.ts                        # subscribeSessionEvents, subscribeSessionsListEvents, sendChat, sendInput
+  api.ts                        # subscribeSessionEvents, subscribeSessionsListEvents, sendChat, sendInput, abortSession
   hooks/useChat.ts              # sync state จาก SSE stream ของ session แทนการรอ response ราย request
   hooks/useSessions.ts          # sync รายการ sessions + live status (running/idle/waiting_permission) สำหรับ sidebar
-  components/SessionSidebar.tsx # แสดงรายการ sessions + loading icon เมื่อ session กำลังทำงานอยู่
-  components/ChatView.tsx       # แสดง layout Sidebar + Chat, status badge + input bar สำหรับตอบ permission / prompt
+  components/SessionSidebar.tsx # แสดงรายการ sessions + loading icon เมื่อ session กำลังทำงานอยู่ + close button
+  components/ChatView.tsx       # Sidebar + Chat, Markdown/tool collapse, ปุ่ม Abort, status badge + input bar
   components/TaskTimeline.tsx   # อัปเดตจาก .jsonl + hook events
 
 plugins/web/

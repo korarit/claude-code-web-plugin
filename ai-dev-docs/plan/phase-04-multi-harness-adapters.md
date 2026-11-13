@@ -45,11 +45,11 @@
        - Permission ผ่าน blocking `PreToolUse` hook (รองรับ decisions: `auto_approve` / `deny` / `ask` / `force_ask` — ไม่มี `PermissionRequest` หรือ `Notification` hook แยกเหมือน Claude); Option UI ผ่าน `transcript.jsonl` + `tmux capture-pane`/`send-keys` + Terminal Drawer fallback
        - Subagents: ตรวจจับ `invoke_subagent` จาก `transcript.jsonl` แล้ว tail `~/.gemini/antigravity-cli/brain/<subagentConvId>/.system_generated/logs/transcript.jsonl` เข้า Subagent Tree
     3. `OpenCodeHarnessAdapter`:
-       - เชื่อมต่อผ่าน `opencode serve` (หรือ spawn `opencode` ใน `tmux` แล้วต่อ `opencode attach` / SSE `GET /event`)
+       - บริหาร lifecycle ของ `opencode serve --port <ephemeral>` (เช่น 1 managed daemon ต่อ workspace หรือ attach เข้า `opencode serve` ที่รันอยู่แล้ว) พร้อม healthcheck และ clean shutdown
        - Normalize SSE events (`message.*`, `session.*`, `tool.*`, `permission.asked`, `question.asked`) → `DomainChatEvent` & `PendingInteraction`
        - ส่งคำตอบ permission/question กลับผ่าน REST endpoints (`/permission`, `/question`) ของ OpenCode server โดยตรง
        - Subagents: subscribe `/global/event` แล้วจับ child sessions ที่มี `parentID` เข้า Subagent Tree & Drill-down
-  - **Registry & Endpoint:** `HarnessRegistry` + `GET /api/harnesses` คืนรายการ 3 harnesses พร้อมสถานะความพร้อมบนเครื่อง
+  - **Registry & Endpoint:** `HarnessRegistry` + `GET /api/harnesses` คืนรายการ 3 harnesses พร้อมสถานะความพร้อมบนเครื่อง, models ที่มีจริง และ agent profiles (`--agent` สำหรับ `claude` / `agy`)
 
 ### 3.3 Frontend (`apps/web`)
 - `HarnessPicker`: เลือก `Claude CLI`, `Antigravity (agy)`, หรือ `OpenCode` ก่อนเริ่ม session ใหม่ (disable หรือขึ้น tooltip ถ้าเครื่องยังไม่ได้ติดตั้ง binary นั้น)

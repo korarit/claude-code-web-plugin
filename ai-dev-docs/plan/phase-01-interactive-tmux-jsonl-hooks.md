@@ -61,37 +61,46 @@
 - `handle-hook.usecase.ts`:
   - Map hook events (`PreToolUse`, `PostToolUse`, `PermissionRequest`, `Notification`, `Stop`, `SessionStart`, `SessionEnd`) เป็นการอัปเดต `SessionStatus`, ผูก `transcript_path`, และ publish event เข้า `EventBusPort`
 
-### 3.4 `apps/api/src/modules/chat/infrastructure/`
+### 3.4 `apps/api/src/modules/chat/infrastructure/` & Server Security
+- `env.ts` / `index.ts`:
+  - Bind เฉพาะ `127.0.0.1` เป็นค่าเริ่มต้น (ห้ามเปิด `0.0.0.0` โดยไม่มี auth เพื่อป้องกัน remote RCE ผ่าน `tmux send-keys`)
+  - สร้าง runtime lock/discovery file `~/.harness-web/runtime.json` (`{ port, pid, token }`) ตอน startup และลบตอน graceful shutdown; ตรวจ local token / origin สำหรับ endpoints สำคัญ
+- `session.repository.ts`:
+  - เปลี่ยนจาก In-Memory ล้วนเป็น **Lightweight Persistent Store** (`~/.harness-web/sessions.json` + in-memory cache) เก็บ `{ id, tmuxSession, transcriptPath, cwd, model, status }` เพื่อให้ restart `apps/api` แล้วกลับมาเฝ้าต่อได้จริง
 - `tmux-runner.ts`:
   - ตั้งชื่อ session deterministic เช่น `cw-<shortId>`
-  - สร้าง session ด้วย `tmux new-session -d -s <name> -c <cwd> "claude --model <m>"` (หรือ `--resume <id>`)
-  - ส่งข้อความ multi-line อย่างปลอดภัย: เขียนไฟล์ temp/stdin → `tmux load-buffer -b <buf> -` → `tmux paste-buffer -b <buf> -t <name>` → `tmux send-keys -t <name> Enter` (แก้ปัญหา special chars และ newline)
+  - สร้าง session ด้วย `tmux new-session -d -s <name> -c <cwd> -e CLAUDE_WEB_SESSION_ID=<id> -e CLAUDE_WEB_PORT=<port> -e CLAUDE_WEB_TOKEN=<token> "claude --session-id <uuid> --model <m>"` (รู้ `.jsonl` path ทันที + ผูก session ตั้งแต่ hook แรก)
+  - ส่งข้อความ multi-line อย่างปลอดภัย: เขียนผ่าน stdin → `tmux load-buffer -b <buf> -` → `tmux paste-buffer -b <buf> -t <name>` → `tmux send-keys -t <name> Enter` (แก้ปัญหา special chars และ newline)
+  - เพิ่ม `abortSession(name)` (`tmux send-keys -t <name> C-c`) และ `killSession(name)` (`tmux kill-session -t <name>`)
   - รอ Claude CLI boot พร้อมรับ input ใน session ใหม่ (ใช้ `SessionStart` hook หรือ fallback poll `capture-pane`)
 - `jsonl-watcher.ts`:
   - เก็บ `byteOffset` ต่อไฟล์ อ่านเฉพาะส่วนที่ append ใหม่ (ไม่ re-read ทั้งไฟล์)
   - จัดการ partial line buffer กรณีเขียนยังไม่จบ `\n`
-  - แปลง record จาก Claude Code `.jsonl` (`user`, `assistant`, `system`, `progress`, `tool_use`, `tool_result`, `parent_tool_use_id`, token usage) → `DomainChatEvent`
+  - แปลง record จาก Claude Code `.jsonl` (`user`, `assistant`, `system`, `progress`, `tool_use`, `tool_result`, `parent_tool_use_id`) → `DomainChatEvent`
+  - คำนวณ token usage จาก `message.usage` (`input_tokens + cache_read_input_tokens + cache_creation_input_tokens + output_tokens`) เทียบกับ context window limit ของโมเดลเพื่อส่งให้ `ContextBar`
 - `event-bus.ts`: in-memory `Map<sessionId, Set<Subscriber>>` สำหรับ fan-out ไปยังหลาย browser tab
 
 ### 3.5 `apps/api/src/modules/chat/presentation/chat.routes.ts`
 - `POST /api/chat/send` → สร้าง/ใช้ session เดิม ส่ง prompt เข้า `tmux` แล้วคืน `{ session }` (202 / 200)
+- `POST /api/chat/sessions/:id/abort` → ส่ง `Ctrl+C` หยุดงานที่กำลังรันอยู่กลางคัน
+- `DELETE /api/chat/sessions/:id` → ปิด `tmux` session และลบ/mark stopped
 - `GET /api/chat/sessions` → list sessions พร้อม `status` ล่าสุด (`idle` / `running` / `waiting_permission` / `stopped`)
 - `GET /api/chat/sessions/events` → global SSE stream สำหรับ Session Sidebar (อัปเดตสถานะ `running` / `idle` / `waiting_permission` ของทุก session แบบ real-time แม้ไม่ได้เปิดห้องนั้นอยู่)
 - `GET /api/chat/sessions/:id/events` → SSE stream ต่อ `sessionId` (replay recent events จาก `.jsonl` + stream real-time ต่อ)
 - `POST /api/chat/hooks` → รับ JSON payload จาก `hook-forwarder.sh`
 
 ### 3.6 `plugins/web/`
-- `scripts/hook-forwarder.sh`: อ่าน stdin JSON จาก Claude Code Hook, อ่าน `CLAUDE_WEB_PORT` (หรือ port file/env), ถ้ามี server รันอยู่ให้ `curl -sS -m 1 -X POST http://127.0.0.1:${PORT}/api/chat/hooks ...` และ **ต้อง exit 0 เสมอ** แม้ server ปิดอยู่
+- `scripts/hook-forwarder.sh`: อ่าน stdin JSON จาก Claude Code Hook, อ่าน port/token จาก `CLAUDE_WEB_PORT` หรือ `~/.harness-web/runtime.json`, ถ้ามี server รันอยู่ให้ `curl -sS -m 1 -X POST http://127.0.0.1:${PORT}/api/chat/hooks ...` และ **ต้อง exit 0 เสมอ** แม้ server ปิดอยู่
 - `hooks/hooks.json` (หรือ config snippet ใน plugin): ลงทะเบียน hooks ที่จำเป็น
 
 ### 3.7 `apps/web/src/features/chat/`
-- `api.ts`: เพิ่ม `subscribeSessionEvents(sessionId, onEvent)` และ `subscribeSessionsListEvents(onUpdate)` ด้วย `EventSource`
+- `api.ts`: เพิ่ม `subscribeSessionEvents`, `subscribeSessionsListEvents`, `abortSession`, `deleteSession`
 - `hooks/useChat.ts` + `hooks/useSessions.ts`: แยก action `send()` ออกจาก subscription stream ของ session; sync รายการ session และสถานะแบบ real-time; เมื่อเปิดเว็บใหม่หรือรีเฟรชหน้า ยังโหลดประวัติ + ตาม stream ต่อได้
 - `components/SessionSidebar.tsx`:
-  - แสดงรายการ sessions ทั้งหมดที่เปิดอยู่ (ชื่อ/preview ข้อความแรก, `model` badge, เวลาอัปเดตล่าสุด) และปุ่ม `+ New Session`
+  - แสดงรายการ sessions ทั้งหมดที่เปิดอยู่ (ชื่อ/preview ข้อความแรก, `model` badge, เวลาอัปเดตล่าสุด) และปุ่ม `+ New Session` + ปุ่มปิด/ลบ session
   - **Live Status Indicator:** ถ้า session ไหนกำลังทำงาน (`status === "running"`) ให้แสดง **loading spinner icon** หมุนอยู่ข้างชื่อ session (แม้กำลังเปิดดู session อื่นอยู่), และแสดง badge แจ้งเตือนเมื่อ `status === "waiting_permission"`
   - คลิกสลับดู session ใดก็ได้โดยไม่ขัดจังหวะ session อื่นที่กำลังทำงานใน background
-- `components/ChatView.tsx`: จัด layout แบบ Sidebar + Main Chat Area และแสดงสถานะ session (`idle`, `running`, `waiting_permission`)
+- `components/ChatView.tsx`: จัด layout แบบ Sidebar + Main Chat Area, แสดงสถานะ session, ปุ่ม **Stop/Abort** ตอนกำลังรัน, Markdown + code copy rendering, และ collapsible tool call blocks (`Read`, `Edit`, `Bash`)
 
 ## 4. Edge Cases & Mitigations
 
@@ -108,6 +117,7 @@
    - `handle-hook.usecase` เปลี่ยน `SessionStatus` ตรงตาม hook event
 3. Smoke test:
    - เปิด server → `POST /api/chat/hooks` ด้วย mock payload → SSE `/api/chat/sessions/:id/events` และ `/api/chat/sessions/events` ได้รับ event ทันที
-   - ทดสอบกับ `tmux` session จริง: ส่งข้อความจากเว็บ → เห็นข้อความเข้า terminal → เห็นคำตอบไหลกลับหน้าเว็บ real-time → restart API server แล้ว session ยังทำงานต่อได้
+   - ทดสอบกับ `tmux` session จริง: ส่งข้อความจากเว็บ → เห็นข้อความเข้า terminal → เห็นคำตอบไหลกลับหน้าเว็บ real-time → restart API server แล้วโหลด `~/.harness-web/sessions.json` กลับมาเฝ้าต่อได้
+   - ทดสอบ Abort & Delete: กด Stop (`POST /api/chat/sessions/:id/abort`) แล้วส่ง `Ctrl+C` เข้า `tmux` หยุดงานได้ และลบ session ปิด `tmux` process ได้สะอาด
    - ทดสอบเปิด 2 sessions พร้อมกัน: สั่งงาน Session A แล้วกดสลับไปดู Session B → **Session Sidebar** แสดง **loading icon** บน Session A จนกว่าจะทำงานเสร็จ (`Stop` hook → `idle`)
 4. `hook-forwarder.sh` เมื่อ server ปิดอยู่ต้องจบด้วย exit code `0` ภายใน `< 200ms`

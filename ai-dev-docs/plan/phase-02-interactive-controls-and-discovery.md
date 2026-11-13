@@ -49,10 +49,19 @@
   - จำกัด concurrent active sessions ที่รันพร้อมกัน (เช่น default soft-warning เมื่อเปิดเกิน 2–3 sessions)
   - ป้องกัน double-submit / accidental rapid loop จาก UI (debounce + lock ระหว่าง `running`)
 
+### 2.5 Multi-Project `cwd`, Agent Profile, Slash Commands & Image Input
+- **Project Directory (`cwd`) & Agent Profile (`--agent`):**
+  - เพิ่ม `cwd` picker (recent projects / path input) และ optional `agentProfile?: string` (ส่ง `--agent <name>` ตอน spawn) เวลาสร้าง session ใหม่ เพื่อให้ 1 Web UI คุมงานข้ามหลายโปรเจคและหลาย role ได้
+- **Mid-Session Model Switch & Slash Commands:**
+  - เปลี่ยน model กลาง session ด้วยการส่ง `/model <name>` เข้า `tmux` (ไม่ต้องเปิด session ใหม่)
+  - รองรับส่ง slash commands ยอดนิยมจาก UI (`/compact`, `/clear`, `/cost`) และ `@file` autocomplete จาก workspace (`GET /api/workspace/files`)
+- **Image / Screenshot Paste Input:**
+  - `POST /api/chat/upload` (หรือ paste รูปจาก clipboard บนเว็บ) บันทึกรูปลง temp file ใน workspace/cache แล้วแนบ path เข้า prompt ของ CLI (`tmux`) ให้ agent อ่านภาพได้
+
 ## 3. Exit Criteria / Verification
 
 1. เมื่อ `claude` ติด permission prompt, `PermissionRequest` hook hold รอคำตัดสินจากหน้าเว็บ → กด Allow/Deny แล้วทำงานต่อได้โดยไม่ค้าง (และหากเว็บไม่เปิดอยู่ hook ต้อง fallback กลับสู่ TUI ภายใน timeout)
 2. เมื่อ `claude` เรียก `AskUserQuestion` (single/multi-select), หน้าเว็บแสดงตัวเลือกจาก `.jsonl` และส่ง keystrokes เข้า `tmux` เพื่อตอบจนผ่านได้
 3. เปิด `claude` ใน terminal ภายนอก → หน้าเว็บมองเห็น session ใน list และโหลดประวัติจาก `.jsonl` ได้ถูกต้อง
 4. กด Resume session เก่าจากประวัติ `.jsonl` แล้วเปิด `tmux` ต่อบทสนทนาเดิมได้
-5. สามารถสลับสร้าง session แบบใช้ `ANTHROPIC_API_KEY` (isolated env ใน `tmux new-session -e`) โดยไม่กระทบ global CLI login ของเครื่อง
+5. สามารถสลับสร้าง session แบบเลือก `cwd` ต่างกัน, ระบุ `agentProfile`, สั่ง `/model` หรือ `/compact` กลาง session, และใช้ `ANTHROPIC_API_KEY` (isolated env ใน `tmux new-session -e`) โดยไม่กระทบ global CLI login ของเครื่อง

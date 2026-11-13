@@ -40,10 +40,10 @@
 - ส่งผ่าน `tmux load-buffer` + `paste-buffer` (สำหรับ `claude` / `agy`) หรือ OpenCode message API (สำหรับ `opencode`) แนบนำหน้าคำสั่งใหม่ของผู้ใช้ในรูปแบบที่มีโครงสร้างชัดเจน
 - อัปเดต `target.lastSyncedSeq = latest` ทันทีหลังส่งสำเร็จ
 
-### 3.2 Large-History File Sync Fallback (กัน Terminal/Buffer ล้นเมื่อคุยยาวมาก)
-- ถ้าขนาด Verbatim Delta เกิน threshold (เช่น `> 20 KB` หรือเกิน `N` turns):
+### 3.2 Large-History File Sync Fallback & Context Window Guard
+- ถ้าขนาด Verbatim Delta เกิน threshold (เช่น `> 20 KB` หรือเกิน `N` turns) **หรือใกล้เกิน Context Window Limit ของโมเดลปลายทาง** (เช่น สลับจากโมเดล 1M context ไปยังโมเดล 128k/200k):
   - เขียนไฟล์เต็มไว้ที่ `.harness-web/sync/<canonicalSessionId>-<fromSeq>-<toSeq>.md` (เก็บทุกบรรทัด 100% ไม่ตัดทอน)
-  - ส่ง verbatim ช่วงล่าสุด (เช่น 5–10 turns สุดท้าย) เข้าไปตรงๆ + แนบคำสั่งให้ harness ปลายทางอ่านไฟล์ `.harness-web/sync/...md` เพื่อรับบริบทก่อนหน้าทั้งหมดแบบครบถ้วนก่อนลงมือทำคำสั่งใหม่
+  - แสดง warning badge บน UI (`Large context — using File Sync`) แล้วส่งเฉพาะ verbatim ช่วงล่าสุด (เช่น 5–10 turns สุดท้าย) เข้าไปตรงๆ + แนบคำสั่งให้ harness ปลายทางอ่านไฟล์ `.harness-web/sync/...md` เฉพาะส่วนที่ต้องการ เพื่อไม่ให้ prompt ระเบิดเพดาน context window ของโมเดลปลายทาง
 
 ### 3.3 Optional Native DB Injection สำหรับ OpenCode (`opencode import`)
 - สำหรับ `opencode` ที่มีคำสั่ง `opencode import <json>` อย่างเป็นทางการ:
