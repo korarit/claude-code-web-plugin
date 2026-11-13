@@ -8,6 +8,19 @@
     "dev": "bun --watch apps/api/src/index.ts",
     "build": "cd apps/web && bun run build && cd ../api && bun run build",
     "test": "bun test apps/api/test",
-    "typecheck": "./apps/api/node_modules/.bin/tsc --noEmit -p packages/core && ./apps/api/node_modules/.bin/tsc --noEmit -p packages/contracts && bun --filter '*' typecheck"
+    "typecheck": "./apps/api/node_modules/.bin/tsc --noEmit -p packages/core && ./apps/api/node_modules/.bin/tsc --noEmit -p packages/contracts && bun --filter '*' typecheck",
+    "lint": "bun --bun ./node_modules/.bin/eslint .",
+    "boundaries": "bun scripts/check-boundaries.ts",
+    "unused": "bun --bun ./node_modules/.bin/knip",
+    "hooks:install": "bun plugins/web/scripts/install-hooks.ts --install",
+    "hooks:uninstall": "bun plugins/web/scripts/install-hooks.ts --uninstall",
+    "check": "bun run typecheck && bun run lint && bun run boundaries && bun run unused && bun run test && bun run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "eslint-plugin-boundaries": "^7.4.3",
+    "knip": "^6.45.1",
+    "typescript-eslint": "^8.72.2"
   }
 }

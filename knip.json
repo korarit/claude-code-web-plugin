@@ -1,0 +1,21 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreExportsUsedInFile": true,
+  "paths": {
+    "@core/*": ["packages/core/src/*"],
+    "@contracts/*": ["packages/contracts/src/*"],
+    "@/*": ["apps/web/src/*"]
+  },
+  "ignoreDependencies": ["@repo/core", "@repo/contracts"],
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.ts", "plugins/web/scripts/*.ts"]
+    },
+    "packages/core": {},
+    "packages/contracts": {},
+    "apps/api": {
+      "entry": ["test/**/*.test.ts"]
+    },
+    "apps/web": {}
+  }
+}
