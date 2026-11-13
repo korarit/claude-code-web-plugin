@@ -1,6 +1,6 @@
 # Phase 7: UI Polish (`shadcn/ui`), Boundary Enforcement & Packaging
 
-> **Status:** 📋 Planned  
+> **Status:** ✅ Done  
 > **Parent Plan:** [roadmap.md](./roadmap.md)  
 > **Depends On:** [Phase 1](./phase-01-interactive-tmux-jsonl-hooks.md) – [Phase 6](./phase-06-canonical-session-and-sync.md)  
 > **Architecture Spec:** [code-structure.md](../code-structure.md)
