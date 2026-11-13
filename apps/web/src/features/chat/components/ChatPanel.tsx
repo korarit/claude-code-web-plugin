@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
+import type { AgentNode } from "@contracts/agents";
 import type { SessionFileChange } from "@contracts/changes";
+import type { GitWorktreeInfo } from "@contracts/workspace";
 import {
   AVAILABLE_MODELS,
   type AuthMode,
@@ -13,6 +15,7 @@ import {
   type WorkspaceFileEntry,
 } from "@contracts/chat";
 import { useTranslation } from "../../../lib/i18n/index.ts";
+import { getAgentStateMeta } from "../agentStateMeta.ts";
 import { fetchWorkspaceFiles } from "../api.ts";
 import type { ChatMessage, TaskEntry, UsageState } from "../hooks/useChat.ts";
 import ContextBar from "./ContextBar.tsx";
@@ -67,6 +70,10 @@ export interface ChatPanelProps {
   changesFiles?: SessionFileChange[];
   onInspectFileChange?: (path: string, revId?: string) => void;
   showInlineContextBar?: boolean;
+  activeAgent?: AgentNode | null;
+  onBackToMain?: () => void;
+  activeWorktree?: GitWorktreeInfo;
+  onOpenWorktreeModal?: () => void;
 }
 
 export default function ChatPanel({
@@ -106,6 +113,10 @@ export default function ChatPanel({
   changesFiles,
   onInspectFileChange,
   showInlineContextBar = false,
+  activeAgent,
+  onBackToMain,
+  activeWorktree,
+  onOpenWorktreeModal,
 }: ChatPanelProps) {
   const { t } = useTranslation();
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -160,6 +171,8 @@ export default function ChatPanel({
 
   const isBusy = status === "running" || status === "waiting_permission";
   const isMirror = activeSession?.controlMode === "mirror";
+  const isSubagentView = Boolean(activeAgent && activeAgent.agentId !== "main");
+  const isReadOnlySubagent = Boolean(isSubagentView && activeAgent && !activeAgent.canSendInput);
 
   const filteredSlashCommands = useMemo(() => {
     if (!slashOpen) return [];
@@ -201,6 +214,50 @@ export default function ChatPanel({
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-[var(--bg-canvas)]">
       <div className="space-y-2 border-b border-[var(--border-subtle)] px-4 py-2 empty:hidden">
+        {isSubagentView && activeAgent && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-indigo-500/40 bg-indigo-500/10 px-3 py-2 text-xs">
+            <div className="flex min-w-0 items-center gap-2">
+              {onBackToMain && (
+                <button
+                  type="button"
+                  onClick={onBackToMain}
+                  className="shrink-0 rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2.5 py-1 text-[11px] font-semibold text-[var(--text-primary)] hover:border-[var(--accent-primary)]"
+                >
+                  {t("backToMain")}
+                </button>
+              )}
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="truncate font-semibold text-[var(--text-primary)]">
+                    {activeAgent.role}
+                  </span>
+                  {(() => {
+                    const meta = getAgentStateMeta(activeAgent.state);
+                    return (
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${meta.badgeCls}`}
+                      >
+                        {t(meta.labelKey)}
+                      </span>
+                    );
+                  })()}
+                  {isReadOnlySubagent && (
+                    <span className="rounded bg-[var(--bg-surface)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)]">
+                      {t("agentReadOnlyBanner")}
+                    </span>
+                  )}
+                </div>
+                {activeAgent.currentTool && (
+                  <div className="mt-0.5 truncate font-mono text-[10px] text-[var(--text-muted)]">
+                    {activeAgent.currentTool}
+                    {activeAgent.currentTarget ? `: ${activeAgent.currentTarget}` : ""}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {!tmuxAvailable && (
           <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300">
             {t("tmuxUnavailableWarning")}
@@ -276,12 +333,18 @@ export default function ChatPanel({
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {messages.length === 0 ? (
           <div className="mx-auto mt-12 max-w-md rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 text-center">
-            <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-              {t("emptyChatTitle")}
-            </h2>
-            <p className="mt-1.5 text-xs leading-relaxed text-[var(--text-secondary)]">
-              {t("emptyChatSubtitle")}
-            </p>
+            {isSubagentView ? (
+              <p className="text-xs text-[var(--text-muted)]">{t("agentStreamEmpty")}</p>
+            ) : (
+              <>
+                <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                  {t("emptyChatTitle")}
+                </h2>
+                <p className="mt-1.5 text-xs leading-relaxed text-[var(--text-secondary)]">
+                  {t("emptyChatSubtitle")}
+                </p>
+              </>
+            )}
           </div>
         ) : (
           messages.map((msg) => (
@@ -335,6 +398,21 @@ export default function ChatPanel({
       )}
 
       <footer className="relative border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3">
+        {isReadOnlySubagent ? (
+          <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-2 text-xs text-[var(--text-muted)]">
+            <span>{t("agentReadOnlyDesc")}</span>
+            {onBackToMain && (
+              <button
+                type="button"
+                onClick={onBackToMain}
+                className="rounded-md bg-[var(--accent-primary)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-primary-fg)]"
+              >
+                {t("backToMain")}
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
         {(slashOpen && filteredSlashCommands.length > 0) && (
           <div className="absolute right-4 bottom-full left-4 z-20 mb-1 max-w-sm rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] p-1 shadow-lg">
             <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
@@ -426,6 +504,19 @@ export default function ChatPanel({
                   </datalist>
                 </label>
 
+                {onOpenWorktreeModal && (
+                  <button
+                    type="button"
+                    disabled={sending}
+                    onClick={onOpenWorktreeModal}
+                    className="rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] disabled:opacity-50"
+                  >
+                    {activeWorktree && !activeWorktree.isMain && activeWorktree.branch
+                      ? t("worktreeBadge", { branch: activeWorktree.branch })
+                      : t("worktreeButton")}
+                  </button>
+                )}
+
                 <label className="flex items-center gap-1.5 text-[var(--text-secondary)]">
                   <span className="shrink-0">{t("agentProfileLabel")}</span>
                   <input
@@ -453,6 +544,18 @@ export default function ChatPanel({
                   <span className="rounded bg-[var(--bg-elevated)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-secondary)]">
                     @{activeSession.agentProfile}
                   </span>
+                )}
+                {onOpenWorktreeModal && (
+                  <button
+                    type="button"
+                    disabled={sending}
+                    onClick={onOpenWorktreeModal}
+                    className="rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] disabled:opacity-50"
+                  >
+                    {activeWorktree && !activeWorktree.isMain && activeWorktree.branch
+                      ? t("worktreeBadge", { branch: activeWorktree.branch })
+                      : t("worktreeButton")}
+                  </button>
                 )}
               </div>
             )}
@@ -537,6 +640,8 @@ export default function ChatPanel({
             )}
           </div>
         </div>
+          </>
+        )}
       </footer>
     </section>
   );

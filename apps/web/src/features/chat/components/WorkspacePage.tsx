@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AgentNode } from "@contracts/agents";
 import type { SessionStatus } from "@contracts/chat";
 import {
   loadSoundMuted,
@@ -8,19 +9,34 @@ import {
   saveSoundMuted,
 } from "../../../lib/sound.ts";
 import { fetchHealth } from "../api.ts";
+import { useAgents } from "../hooks/useAgents.ts";
+import { useAgentStream } from "../hooks/useAgentStream.ts";
 import { useChanges } from "../hooks/useChanges.ts";
 import { useChat } from "../hooks/useChat.ts";
 import { useSessions } from "../hooks/useSessions.ts";
+import { useWorktrees } from "../hooks/useWorktrees.ts";
+import AgentBoard from "./AgentBoard.tsx";
 import ChangesPanel from "./ChangesPanel.tsx";
 import ChatPanel from "./ChatPanel.tsx";
 import SessionSidebar from "./SessionSidebar.tsx";
 import TerminalPanel from "./TerminalPanel.tsx";
+import WorktreeModal from "./WorktreeModal.tsx";
 import CompactShell, { type CompactViewTab } from "../layouts/CompactShell.tsx";
 import DesktopShell, { type DesktopInspectorTab } from "../layouts/DesktopShell.tsx";
 
-function parseSessionIdFromPath(pathname: string): string | undefined {
-  const match = pathname.match(/^\/sessions\/([^/]+)/);
-  return match ? decodeURIComponent(match[1]!) : undefined;
+function parseRouteFromPath(pathname: string): { sessionId?: string; agentId?: string } {
+  const agentMatch = pathname.match(/^\/sessions\/([^/]+)\/agents\/([^/]+)/);
+  if (agentMatch) {
+    return {
+      sessionId: decodeURIComponent(agentMatch[1]!),
+      agentId: decodeURIComponent(agentMatch[2]!),
+    };
+  }
+  const sessionMatch = pathname.match(/^\/sessions\/([^/]+)/);
+  if (sessionMatch) {
+    return { sessionId: decodeURIComponent(sessionMatch[1]!) };
+  }
+  return {};
 }
 
 function useIsDesktop(): boolean {
@@ -47,10 +63,15 @@ export default function WorkspacePage() {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<DesktopInspectorTab>("changes");
   const [compactTab, setCompactTab] = useState<CompactViewTab>("chat");
+  const [worktreeModalOpen, setWorktreeModalOpen] = useState(false);
+  const [reviewWorktreeCwd, setReviewWorktreeCwd] = useState<string | undefined>(undefined);
   const [soundMuted, setSoundMuted] = useState<boolean>(() => loadSoundMuted());
-  const [activeSessionId, setActiveSessionId] = useState<string | undefined>(() =>
-    typeof window !== "undefined" ? parseSessionIdFromPath(window.location.pathname) : undefined,
+  const initialRoute =
+    typeof window !== "undefined" ? parseRouteFromPath(window.location.pathname) : {};
+  const [activeSessionId, setActiveSessionId] = useState<string | undefined>(
+    initialRoute.sessionId,
   );
+  const [activeAgentId, setActiveAgentId] = useState<string | undefined>(initialRoute.agentId);
   const [tmuxAvailable, setTmuxAvailable] = useState(true);
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [defaultCwd, setDefaultCwd] = useState<string | undefined>(undefined);
@@ -67,16 +88,24 @@ export default function WorkspacePage() {
 
   useEffect(() => {
     const onPopState = () => {
-      setActiveSessionId(parseSessionIdFromPath(window.location.pathname));
+      const parsed = parseRouteFromPath(window.location.pathname);
+      setActiveSessionId(parsed.sessionId);
+      setActiveAgentId(parsed.agentId);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  const navigateSession = useCallback((sessionId?: string) => {
+  const navigateSession = useCallback((sessionId?: string, agentId?: string) => {
     setActiveSessionId(sessionId);
+    setActiveAgentId(agentId);
+    if (sessionId) setReviewWorktreeCwd(undefined);
     setDrawerOpen(false);
-    const nextPath = sessionId ? `/sessions/${encodeURIComponent(sessionId)}` : "/";
+    const nextPath = sessionId
+      ? agentId && agentId !== "main"
+        ? `/sessions/${encodeURIComponent(sessionId)}/agents/${encodeURIComponent(agentId)}`
+        : `/sessions/${encodeURIComponent(sessionId)}`
+      : "/";
     if (window.location.pathname !== nextPath) {
       window.history.pushState({}, "", nextPath);
     }
@@ -89,6 +118,10 @@ export default function WorkspacePage() {
       return next;
     });
   }, []);
+
+  const applySessionAgentRef = useRef<((sessionId: string, agent: AgentNode) => void) | undefined>(
+    undefined,
+  );
 
   const {
     sessions,
@@ -103,9 +136,19 @@ export default function WorkspacePage() {
     unarchive,
     remove,
     hasBackgroundActivity,
-  } = useSessions();
+  } = useSessions({
+    onAgentUpdated: (sid, agent) => applySessionAgentRef.current?.(sid, agent),
+  });
 
-  const changes = useChanges({ activeSessionId, isDesktop });
+  const agentsState = useAgents(activeSessionId);
+  applySessionAgentRef.current = agentsState.applySessionAgentUpdated;
+  const changes = useChanges({
+    activeSessionId,
+    reviewCwd: activeSessionId ? undefined : reviewWorktreeCwd,
+    agents: agentsState.agents,
+    isDesktop,
+  });
+  const agentStream = useAgentStream({ activeSessionId, activeAgentId });
 
   // Play sound notifications when sessions transition into waiting_permission or finish in background.
   const prevStatusMapRef = useRef<Map<string, SessionStatus>>(new Map());
@@ -170,8 +213,34 @@ export default function WorkspacePage() {
       upsertLocal(updated);
     },
     onFileChanged: changes.applyFileChangedEvent,
+    onAgentUpdated: agentsState.applyAgentUpdated,
+    onTasksUpdated: agentsState.applyTasksUpdated,
     onErrorNotification: handleErrorNotification,
   });
+
+  const worktreesState = useWorktrees(activeSession?.cwd || chat.cwd || defaultCwd);
+
+  const activeWorktree = useMemo(() => {
+    const targetCwd = activeSession?.cwd || chat.cwd;
+    if (!targetCwd) return undefined;
+    return worktreesState.worktrees.find((w) => w.path === targetCwd);
+  }, [activeSession?.cwd, chat.cwd, worktreesState.worktrees]);
+
+  const activeAgentNode = useMemo(() => {
+    if (!activeAgentId || activeAgentId === "main") return null;
+    return (
+      agentsState.agents.find((a) => a.agentId === activeAgentId) ??
+      agentStream.agent ?? {
+        agentId: activeAgentId,
+        role: activeAgentId,
+        canSendInput: false,
+        state: "thinking" as const,
+        updatedAt: new Date().toISOString(),
+      }
+    );
+  }, [activeAgentId, agentStream.agent, agentsState.agents]);
+
+  const isSubagentView = Boolean(activeAgentNode && activeAgentId && activeAgentId !== "main");
 
   const handleDelete = useCallback(
     async (sessionId: string) => {
@@ -205,6 +274,52 @@ export default function WorkspacePage() {
     [changes, isDesktop],
   );
 
+  const handleInspectAgentChanges = useCallback(
+    (agentId: string) => {
+      changes.setMode("session");
+      changes.setContributorFilter(`agent:${agentId}`);
+      if (isDesktop) {
+        setInspectorTab("changes");
+        setInspectorOpen(true);
+      } else {
+        setCompactTab("changes");
+      }
+    },
+    [changes, isDesktop],
+  );
+
+  const handleInspectAgentStream = useCallback(
+    (sessionId: string, agentId: string) => {
+      navigateSession(sessionId, agentId);
+      if (!isDesktop) {
+        setCompactTab("chat");
+      }
+    },
+    [isDesktop, navigateSession],
+  );
+
+  const handleReviewWorktreeDiff = useCallback(
+    (wtPath: string) => {
+      const matchingSession = sessions.find((s) => s.cwd === wtPath);
+      if (matchingSession) {
+        setReviewWorktreeCwd(undefined);
+        navigateSession(matchingSession.id);
+      } else {
+        setReviewWorktreeCwd(wtPath);
+        chat.setCwd(wtPath);
+        navigateSession(undefined);
+      }
+      changes.setMode("git");
+      if (isDesktop) {
+        setInspectorTab("changes");
+        setInspectorOpen(true);
+      } else {
+        setCompactTab("changes");
+      }
+    },
+    [changes, chat, isDesktop, navigateSession, sessions],
+  );
+
   const sidebarNode = (
     <SessionSidebar
       activeSessions={activeSessions}
@@ -213,8 +328,16 @@ export default function WorkspacePage() {
       filters={filters}
       onFiltersChange={setFilters}
       selectedSessionId={activeSessionId}
+      selectedAgentId={activeAgentId}
+      selectedSessionAgents={agentsState.agents}
+      agentsBySession={agentsState.agentsBySession}
+      worktrees={worktreesState.worktrees}
       onSelectSession={(id) => navigateSession(id)}
-      onNewSession={() => navigateSession(undefined)}
+      onSelectAgent={handleInspectAgentStream}
+      onNewSession={() => {
+        setReviewWorktreeCwd(undefined);
+        navigateSession(undefined);
+      }}
       onRename={rename}
       onArchive={archive}
       onUnarchive={unarchive}
@@ -238,18 +361,22 @@ export default function WorkspacePage() {
       onAgentProfileChange={chat.setAgentProfile}
       draft={chat.draft}
       onDraftChange={chat.setDraft}
-      messages={chat.messages}
-      tasks={chat.tasks}
-      usage={chat.usage}
+      messages={isSubagentView ? agentStream.messages : chat.messages}
+      tasks={isSubagentView ? agentStream.tasks : chat.tasks}
+      usage={
+        isSubagentView && agentStream.usage.inputTokens > 0
+          ? agentStream.usage
+          : chat.usage
+      }
       status={chat.status}
-      permissionPrompt={chat.permissionPrompt}
-      pendingInteraction={chat.pendingInteraction}
-      concurrencyWarning={chat.concurrencyWarning}
+      permissionPrompt={isSubagentView ? null : chat.permissionPrompt}
+      pendingInteraction={isSubagentView ? null : chat.pendingInteraction}
+      concurrencyWarning={isSubagentView ? null : chat.concurrencyWarning}
       submittingInteraction={chat.submittingInteraction}
       resuming={chat.resuming}
       uploadingImage={chat.uploadingImage}
       sending={chat.sending}
-      error={chat.error}
+      error={isSubagentView ? (agentStream.error ?? chat.error) : chat.error}
       onSend={() => void chat.send()}
       onAbort={() => void chat.abort()}
       onSubmitDecision={(d) => void chat.submitDecision(d)}
@@ -260,12 +387,19 @@ export default function WorkspacePage() {
       changesFiles={changes.files}
       onInspectFileChange={handleInspectFileChange}
       showInlineContextBar={!isDesktop}
+      activeAgent={activeAgentNode}
+      onBackToMain={() => navigateSession(activeSessionId)}
+      activeWorktree={activeWorktree}
+      onOpenWorktreeModal={() => {
+        void worktreesState.refresh(activeSession?.cwd || chat.cwd || defaultCwd);
+        setWorktreeModalOpen(true);
+      }}
     />
   );
 
   const changesNode = (
     <ChangesPanel
-      hasSession={Boolean(activeSessionId)}
+      hasSession={Boolean(activeSessionId || reviewWorktreeCwd)}
       mode={changes.mode}
       onModeChange={changes.setMode}
       files={changes.filteredFiles}
@@ -288,6 +422,28 @@ export default function WorkspacePage() {
       error={changes.error}
       onRefresh={() => void changes.refreshList()}
       onRevert={changes.revert}
+      worktreeBranch={
+        activeWorktree && !activeWorktree.isMain && activeWorktree.branch
+          ? activeWorktree.branch
+          : undefined
+      }
+      canRevert={Boolean(activeSessionId)}
+      lockGitMode={!activeSessionId && Boolean(reviewWorktreeCwd)}
+    />
+  );
+
+  const agentsNode = (
+    <AgentBoard
+      hasSession={Boolean(activeSessionId)}
+      agents={agentsState.agents}
+      tasks={agentsState.tasks}
+      activeAgentId={activeAgentId}
+      loading={agentsState.loading}
+      onInspectAgent={(agentId) => {
+        if (activeSessionId) handleInspectAgentStream(activeSessionId, agentId);
+      }}
+      onBackToMain={() => navigateSession(activeSessionId)}
+      onInspectAgentChanges={handleInspectAgentChanges}
     />
   );
 
@@ -299,47 +455,99 @@ export default function WorkspacePage() {
     />
   );
 
+  const resetRemovedWorktreeCwd = useCallback(
+    (removedPath: string) => {
+      const fallback = worktreesState.repoRoot ?? defaultCwd ?? "";
+      if (chat.cwd === removedPath) {
+        chat.setCwd(fallback);
+      }
+      if (reviewWorktreeCwd === removedPath) {
+        setReviewWorktreeCwd(undefined);
+      }
+    },
+    [chat, defaultCwd, reviewWorktreeCwd, worktreesState.repoRoot],
+  );
+
+  const worktreeModal = (
+    <WorktreeModal
+      open={worktreeModalOpen}
+      repoRoot={worktreesState.repoRoot}
+      worktrees={worktreesState.worktrees}
+      selectedCwd={activeSession?.cwd || chat.cwd}
+      busy={worktreesState.busy}
+      error={worktreesState.error}
+      onClose={() => setWorktreeModalOpen(false)}
+      onCreate={(branch, baseBranch) => worktreesState.create({ branch, baseBranch })}
+      onSelectWorktree={(wtPath) => {
+        setReviewWorktreeCwd(undefined);
+        chat.setCwd(wtPath);
+        if (activeSessionId) navigateSession(undefined);
+      }}
+      onReviewDiff={handleReviewWorktreeDiff}
+      onMerge={async (worktreePath, removeAfterMerge) => {
+        const res = await worktreesState.merge({ worktreePath, removeAfterMerge });
+        if (res.worktreeRemoved) resetRemovedWorktreeCwd(worktreePath);
+        return res;
+      }}
+      onRemove={async (worktreePath) => {
+        const res = await worktreesState.remove({ worktreePath });
+        resetRemovedWorktreeCwd(worktreePath);
+        return res;
+      }}
+    />
+  );
+
   if (isDesktop) {
     return (
-      <DesktopShell
-        activeSession={activeSession}
-        usage={chat.usage}
-        changesCount={changes.summary.filesCount}
-        inspectorOpen={inspectorOpen}
-        inspectorTab={inspectorTab}
-        onSelectInspectorTab={(tab) => {
-          setInspectorTab(tab);
-          setInspectorOpen(true);
-        }}
-        onCloseInspector={() => setInspectorOpen(false)}
-        soundMuted={soundMuted}
-        onToggleSound={toggleSound}
-        onRenameSession={rename}
-        sidebar={sidebarNode}
-        chat={chatNode}
-        changes={changesNode}
-        terminal={terminalNode}
-      />
+      <>
+        <DesktopShell
+          activeSession={activeSession}
+          usage={isSubagentView && agentStream.usage.inputTokens > 0 ? agentStream.usage : chat.usage}
+          changesCount={changes.summary.filesCount}
+          agentsCount={agentsState.agents.length}
+          inspectorOpen={inspectorOpen}
+          inspectorTab={inspectorTab}
+          onSelectInspectorTab={(tab) => {
+            setInspectorTab(tab);
+            setInspectorOpen(true);
+          }}
+          onCloseInspector={() => setInspectorOpen(false)}
+          soundMuted={soundMuted}
+          onToggleSound={toggleSound}
+          onRenameSession={rename}
+          sidebar={sidebarNode}
+          chat={chatNode}
+          changes={changesNode}
+          agents={agentsNode}
+          terminal={terminalNode}
+        />
+        {worktreeModal}
+      </>
     );
   }
 
   return (
-    <CompactShell
-      activeSession={activeSession}
-      usage={chat.usage}
-      changesCount={changes.summary.filesCount}
-      hasBackgroundActivity={hasBackgroundActivity(activeSessionId)}
-      drawerOpen={drawerOpen}
-      onDrawerOpenChange={setDrawerOpen}
-      activeTab={compactTab}
-      onTabChange={setCompactTab}
-      soundMuted={soundMuted}
-      onToggleSound={toggleSound}
-      onNewSession={() => navigateSession(undefined)}
-      sidebar={sidebarNode}
-      chat={chatNode}
-      changes={changesNode}
-      terminal={terminalNode}
-    />
+    <>
+      <CompactShell
+        activeSession={activeSession}
+        usage={isSubagentView && agentStream.usage.inputTokens > 0 ? agentStream.usage : chat.usage}
+        changesCount={changes.summary.filesCount}
+        agentsCount={agentsState.agents.length}
+        hasBackgroundActivity={hasBackgroundActivity(activeSessionId)}
+        drawerOpen={drawerOpen}
+        onDrawerOpenChange={setDrawerOpen}
+        activeTab={compactTab}
+        onTabChange={setCompactTab}
+        soundMuted={soundMuted}
+        onToggleSound={toggleSound}
+        onNewSession={() => navigateSession(undefined)}
+        sidebar={sidebarNode}
+        chat={chatNode}
+        changes={changesNode}
+        agents={agentsNode}
+        terminal={terminalNode}
+      />
+      {worktreeModal}
+    </>
   );
 }

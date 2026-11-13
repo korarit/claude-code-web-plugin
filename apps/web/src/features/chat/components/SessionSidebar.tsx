@@ -1,5 +1,7 @@
 import { useState } from "react";
+import type { AgentActivityState, AgentNode } from "@contracts/agents";
 import type { SessionInfo, SessionOrigin } from "@contracts/chat";
+import type { GitWorktreeInfo } from "@contracts/workspace";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 import type { SessionFilters } from "../hooks/useSessions.ts";
 import ConfirmDeleteModal from "./ConfirmDeleteModal.tsx";
@@ -49,6 +51,49 @@ function StatusIndicator({ status }: { status: SessionInfo["status"] }) {
   return <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--text-muted)]" />;
 }
 
+function SubagentStatusIcon({ state }: { state: AgentActivityState }) {
+  if (
+    state === "thinking" ||
+    state === "reading" ||
+    state === "editing" ||
+    state === "running_cmd"
+  ) {
+    return (
+      <svg
+        className="h-3 w-3 shrink-0 animate-spin text-amber-500"
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-label={state}
+      >
+        <circle
+          className="opacity-25"
+          cx="12"
+          cy="12"
+          r="10"
+          stroke="currentColor"
+          strokeWidth="3"
+        />
+        <path
+          className="opacity-85"
+          fill="currentColor"
+          d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"
+        />
+      </svg>
+    );
+  }
+  if (state === "waiting") {
+    return <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-amber-500" />;
+  }
+  if (state === "done") {
+    return (
+      <span className="shrink-0 font-mono text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+        ✓
+      </span>
+    );
+  }
+  return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--text-muted)]" />;
+}
+
 export interface SessionSidebarProps {
   activeSessions: SessionInfo[];
   archivedSessions: SessionInfo[];
@@ -56,7 +101,12 @@ export interface SessionSidebarProps {
   filters: SessionFilters;
   onFiltersChange: (next: SessionFilters) => void;
   selectedSessionId?: string;
+  selectedAgentId?: string;
+  selectedSessionAgents?: AgentNode[];
+  agentsBySession?: Record<string, AgentNode[]>;
+  worktrees?: GitWorktreeInfo[];
   onSelectSession: (sessionId: string) => void;
+  onSelectAgent?: (sessionId: string, agentId: string) => void;
   onNewSession: () => void;
   onRename: (sessionId: string, title: string) => Promise<unknown>;
   onArchive: (sessionId: string) => Promise<unknown>;
@@ -71,7 +121,12 @@ export default function SessionSidebar({
   filters,
   onFiltersChange,
   selectedSessionId,
+  selectedAgentId,
+  selectedSessionAgents = [],
+  agentsBySession = {},
+  worktrees = [],
   onSelectSession,
+  onSelectAgent,
   onNewSession,
   onRename,
   onArchive,
@@ -115,14 +170,21 @@ export default function SessionSidebar({
   const renderRow = (s: SessionInfo, isArchived: boolean) => {
     const selected = s.id === selectedSessionId;
     const isEditing = editingId === s.id;
+    const sessionAgents = selected ? selectedSessionAgents : (agentsBySession[s.id] ?? []);
+    const subagents = sessionAgents.filter((a) => a.agentId !== "main");
+    const worktreeMatch = s.cwd
+      ? worktrees.find((w) => !w.isMain && w.path === s.cwd)
+      : undefined;
 
     return (
       <div
         key={s.id}
         className={`group rounded-md border px-2.5 py-2 transition-colors ${
-          selected
+          selected && !selectedAgentId
             ? "border-[var(--border-strong)] bg-[var(--bg-elevated)]"
-            : "border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)]/60"
+            : selected
+              ? "border-[var(--border-subtle)] bg-[var(--bg-elevated)]/60"
+              : "border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)]/60"
         }`}
       >
         <div className="flex items-start gap-2">
@@ -171,6 +233,11 @@ export default function SessionSidebar({
                   <span className="rounded bg-[var(--bg-muted)] px-1 py-0.5 font-mono">
                     {s.model}
                   </span>
+                  {worktreeMatch?.branch && (
+                    <span className="rounded bg-indigo-500/15 px-1 py-0.5 font-mono text-indigo-700 dark:text-indigo-300">
+                      {t("worktreeBadge", { branch: worktreeMatch.branch })}
+                    </span>
+                  )}
                   {s.cwd && <span className="truncate">{folderName(s.cwd)}</span>}
                   <span className="ml-auto shrink-0">{formatRelativeTime(s.updatedAt)}</span>
                 </div>
@@ -217,6 +284,30 @@ export default function SessionSidebar({
             >
               {t("deletePermanently")}
             </button>
+          </div>
+        )}
+
+        {subagents.length > 0 && onSelectAgent && (
+          <div className="mt-2 space-y-0.5 border-t border-[var(--border-subtle)]/70 pt-1.5 pl-3">
+            {subagents.map((agent) => {
+              const childSelected = selected && selectedAgentId === agent.agentId;
+              return (
+                <button
+                  key={agent.agentId}
+                  type="button"
+                  onClick={() => onSelectAgent(s.id, agent.agentId)}
+                  className={`flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-[11px] transition-colors ${
+                    childSelected
+                      ? "bg-[var(--bg-surface)] font-semibold text-[var(--text-primary)] ring-1 ring-[var(--accent-primary)]"
+                      : "text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]/70 hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  <span className="shrink-0 text-[var(--text-muted)]">↳</span>
+                  <SubagentStatusIcon state={agent.state} />
+                  <span className="min-w-0 flex-1 truncate">{agent.role}</span>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

@@ -6,12 +6,13 @@ import ContextBar from "../components/ContextBar.tsx";
 import SoundToggle from "../components/SoundToggle.tsx";
 import ThemeSwitcher from "../components/ThemeSwitcher.tsx";
 
-export type CompactViewTab = "chat" | "changes" | "terminal";
+export type CompactViewTab = "chat" | "changes" | "agents" | "terminal";
 
 export interface CompactShellProps {
   activeSession?: SessionInfo;
   usage: UsageState;
   changesCount: number;
+  agentsCount: number;
   hasBackgroundActivity: boolean;
   drawerOpen: boolean;
   onDrawerOpenChange: (open: boolean) => void;
@@ -23,6 +24,7 @@ export interface CompactShellProps {
   sidebar: ReactNode;
   chat: ReactNode;
   changes: ReactNode;
+  agents: ReactNode;
   terminal: ReactNode;
 }
 
@@ -30,6 +32,7 @@ export default function CompactShell({
   activeSession,
   usage,
   changesCount,
+  agentsCount,
   hasBackgroundActivity,
   drawerOpen,
   onDrawerOpenChange,
@@ -41,6 +44,7 @@ export default function CompactShell({
   sidebar,
   chat,
   changes,
+  agents,
   terminal,
 }: CompactShellProps) {
   const { t } = useTranslation();
@@ -86,6 +90,8 @@ export default function CompactShell({
           chat
         ) : activeTab === "changes" ? (
           <div className="min-w-0 flex-1 overflow-hidden">{changes}</div>
+        ) : activeTab === "agents" ? (
+          <div className="min-w-0 flex-1 overflow-hidden">{agents}</div>
         ) : (
           <div className="min-w-0 flex-1 overflow-hidden">{terminal}</div>
         )}
@@ -113,6 +119,17 @@ export default function CompactShell({
           }`}
         >
           {t("changesTab", { count: changesCount })}
+        </button>
+        <button
+          type="button"
+          onClick={() => onTabChange("agents")}
+          className={`flex-1 py-2 text-xs font-semibold ${
+            activeTab === "agents"
+              ? "text-[var(--text-primary)]"
+              : "text-[var(--text-muted)]"
+          }`}
+        >
+          {t("agentsTab", { count: agentsCount })}
         </button>
         <button
           type="button"

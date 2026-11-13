@@ -1,3 +1,4 @@
+import type { AllAgentsResponse, SessionAgentsResponse } from "@contracts/agents";
 import type {
   FileDiffMode,
   FileDiffResponse,
@@ -21,6 +22,15 @@ import type {
   UploadImageResponse,
   WorkspaceFileEntry,
 } from "@contracts/chat";
+import type {
+  CreateWorktreeRequest,
+  CreateWorktreeResponse,
+  ListWorktreesResponse,
+  MergeWorktreeRequest,
+  MergeWorktreeResponse,
+  RemoveWorktreeRequest,
+  RemoveWorktreeResponse,
+} from "@contracts/workspace";
 import type { ApiResponse } from "@contracts/http";
 import { safeJsonParse } from "@core/utils";
 
@@ -178,6 +188,8 @@ const CHAT_EVENT_TYPES = [
   "interaction",
   "interaction_resolved",
   "file_changed",
+  "agent_updated",
+  "tasks_updated",
 ] as const;
 
 export function subscribeSessionEvents(
@@ -224,6 +236,7 @@ export function subscribeSessionsListEvents(
   es.addEventListener("snapshot", handle as EventListener);
   es.addEventListener("upsert", handle as EventListener);
   es.addEventListener("delete", handle as EventListener);
+  es.addEventListener("agent_updated", handle as EventListener);
   es.onerror = () => {
     onError?.();
   };
@@ -318,4 +331,107 @@ export async function revertFileChange(
     },
   );
   return parseApiJson<RevertFileResponse>(res);
+}
+
+export async function fetchSessionAgents(sessionId: string): Promise<SessionAgentsResponse> {
+  const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/agents`);
+  return parseApiJson<SessionAgentsResponse>(res);
+}
+
+export async function fetchAllAgents(): Promise<AllAgentsResponse> {
+  const res = await fetch("/api/chat/agents");
+  return parseApiJson<AllAgentsResponse>(res);
+}
+
+export async function fetchWorkspaceChanges(cwd?: string): Promise<SessionChangesResponse> {
+  const params = new URLSearchParams();
+  if (cwd) params.set("cwd", cwd);
+  const qs = params.toString();
+  const res = await fetch(`/api/workspace/changes${qs ? `?${qs}` : ""}`);
+  return parseApiJson<SessionChangesResponse>(res);
+}
+
+export async function fetchWorkspaceFileDiff(
+  path: string,
+  cwd?: string,
+): Promise<FileDiffResponse> {
+  const params = new URLSearchParams({ path });
+  if (cwd) params.set("cwd", cwd);
+  const res = await fetch(`/api/workspace/changes/diff?${params.toString()}`);
+  return parseApiJson<FileDiffResponse>(res);
+}
+
+export async function fetchWorkspaceRawFile(
+  path: string,
+  cwd?: string,
+): Promise<RawFileResponse> {
+  const params = new URLSearchParams({ path });
+  if (cwd) params.set("cwd", cwd);
+  const res = await fetch(`/api/workspace/files/raw?${params.toString()}`);
+  return parseApiJson<RawFileResponse>(res);
+}
+
+export function subscribeAgentEvents(
+  sessionId: string,
+  agentId: string,
+  onEvent: (event: ChatStreamEvent) => void,
+  onError?: () => void,
+): () => void {
+  const es = new EventSource(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/agents/${encodeURIComponent(agentId)}/events`,
+  );
+
+  const handle = (ev: MessageEvent) => {
+    if (typeof ev.data !== "string") return;
+    const parsed = safeJsonParse<ChatStreamEvent>(ev.data);
+    if (parsed && typeof parsed.type === "string") {
+      onEvent(parsed);
+    }
+  };
+
+  for (const type of CHAT_EVENT_TYPES) {
+    es.addEventListener(type, handle as EventListener);
+  }
+  es.onerror = () => {
+    onError?.();
+  };
+
+  return () => {
+    es.close();
+  };
+}
+
+export async function fetchWorktrees(cwd?: string): Promise<ListWorktreesResponse> {
+  const params = new URLSearchParams();
+  if (cwd) params.set("cwd", cwd);
+  const qs = params.toString();
+  const res = await fetch(`/api/workspace/worktrees${qs ? `?${qs}` : ""}`);
+  return parseApiJson<ListWorktreesResponse>(res);
+}
+
+export async function createWorktree(req: CreateWorktreeRequest): Promise<CreateWorktreeResponse> {
+  const res = await fetch("/api/workspace/worktrees", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  return parseApiJson<CreateWorktreeResponse>(res);
+}
+
+export async function mergeWorktree(req: MergeWorktreeRequest): Promise<MergeWorktreeResponse> {
+  const res = await fetch("/api/workspace/worktrees/merge", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  return parseApiJson<MergeWorktreeResponse>(res);
+}
+
+export async function removeWorktree(req: RemoveWorktreeRequest): Promise<RemoveWorktreeResponse> {
+  const res = await fetch("/api/workspace/worktrees/remove", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  return parseApiJson<RemoveWorktreeResponse>(res);
 }

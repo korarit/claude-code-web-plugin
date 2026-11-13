@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { AgentNode, TeamTaskItem } from "@contracts/agents";
 import type { SessionFileChange } from "@contracts/changes";
 import type {
   AuthMode,
@@ -61,6 +62,8 @@ export interface UseChatOptions {
   onSessionCreated?: (session: SessionInfo) => void;
   onSessionUpdated?: (session: SessionInfo) => void;
   onFileChanged?: (fileChange: SessionFileChange) => void;
+  onAgentUpdated?: (agent: AgentNode) => void;
+  onTasksUpdated?: (tasks: TeamTaskItem[]) => void;
   onErrorNotification?: () => void;
 }
 
@@ -71,6 +74,8 @@ export function useChat({
   onSessionCreated,
   onSessionUpdated,
   onFileChanged,
+  onAgentUpdated,
+  onTasksUpdated,
   onErrorNotification,
 }: UseChatOptions) {
   const [model, setModel] = useState<ModelId>(activeSession?.model ?? "sonnet");
@@ -99,8 +104,12 @@ export function useChat({
 
   const seenEventIdsRef = useRef<Set<string>>(new Set());
   const onFileChangedRef = useRef(onFileChanged);
+  const onAgentUpdatedRef = useRef(onAgentUpdated);
+  const onTasksUpdatedRef = useRef(onTasksUpdated);
   const onErrorNotificationRef = useRef(onErrorNotification);
   onFileChangedRef.current = onFileChanged;
+  onAgentUpdatedRef.current = onAgentUpdated;
+  onTasksUpdatedRef.current = onTasksUpdated;
   onErrorNotificationRef.current = onErrorNotification;
 
   useEffect(() => {
@@ -257,10 +266,13 @@ export function useChat({
             subAgent,
           };
 
-          setTasks((prev) => [
-            ...prev,
-            { id: block.id, tool: toolName, label: summary, subAgent },
-          ]);
+          if (toolName !== "Thinking") {
+            setTasks((prev) =>
+              prev.some((t) => t.id === block.id)
+                ? prev
+                : [...prev, { id: block.id, tool: toolName, label: summary, subAgent }],
+            );
+          }
 
           setMessages((prev) => {
             const last = prev[prev.length - 1];
@@ -302,6 +314,18 @@ export function useChat({
         case "file_changed":
           if (event.fileChange) {
             onFileChangedRef.current?.(event.fileChange);
+          }
+          break;
+
+        case "agent_updated":
+          if (event.agent) {
+            onAgentUpdatedRef.current?.(event.agent);
+          }
+          break;
+
+        case "tasks_updated":
+          if (event.tasks) {
+            onTasksUpdatedRef.current?.(event.tasks);
           }
           break;
 

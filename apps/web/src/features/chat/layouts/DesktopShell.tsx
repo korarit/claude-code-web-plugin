@@ -6,12 +6,13 @@ import ContextBar from "../components/ContextBar.tsx";
 import SoundToggle from "../components/SoundToggle.tsx";
 import ThemeSwitcher from "../components/ThemeSwitcher.tsx";
 
-export type DesktopInspectorTab = "changes" | "terminal";
+export type DesktopInspectorTab = "changes" | "agents" | "terminal";
 
 export interface DesktopShellProps {
   activeSession?: SessionInfo;
   usage: UsageState;
   changesCount: number;
+  agentsCount: number;
   inspectorOpen: boolean;
   inspectorTab: DesktopInspectorTab;
   onSelectInspectorTab: (tab: DesktopInspectorTab) => void;
@@ -22,6 +23,7 @@ export interface DesktopShellProps {
   sidebar: ReactNode;
   chat: ReactNode;
   changes: ReactNode;
+  agents: ReactNode;
   terminal: ReactNode;
 }
 
@@ -29,6 +31,7 @@ export default function DesktopShell({
   activeSession,
   usage,
   changesCount,
+  agentsCount,
   inspectorOpen,
   inspectorTab,
   onSelectInspectorTab,
@@ -39,6 +42,7 @@ export default function DesktopShell({
   sidebar,
   chat,
   changes,
+  agents,
   terminal,
 }: DesktopShellProps) {
   const { t } = useTranslation();
@@ -165,6 +169,18 @@ export default function DesktopShell({
           </button>
           <button
             type="button"
+            onClick={() => toggleTab("agents")}
+            aria-pressed={inspectorOpen && inspectorTab === "agents"}
+            className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              inspectorOpen && inspectorTab === "agents"
+                ? "border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--text-primary)]"
+                : "border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            }`}
+          >
+            {t("agentsTab", { count: agentsCount })}
+          </button>
+          <button
+            type="button"
             onClick={() => toggleTab("terminal")}
             aria-pressed={inspectorOpen && inspectorTab === "terminal"}
             className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
@@ -214,6 +230,17 @@ export default function DesktopShell({
                   </button>
                   <button
                     type="button"
+                    onClick={() => onSelectInspectorTab("agents")}
+                    className={`rounded px-2.5 py-1 text-[11px] font-medium ${
+                      inspectorTab === "agents"
+                        ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
+                        : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    }`}
+                  >
+                    {t("agentsTab", { count: agentsCount })}
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => onSelectInspectorTab("terminal")}
                     className={`rounded px-2.5 py-1 text-[11px] font-medium ${
                       inspectorTab === "terminal"
@@ -234,7 +261,11 @@ export default function DesktopShell({
                 </button>
               </div>
               <div className="min-h-0 flex-1">
-                {inspectorTab === "changes" ? changes : terminal}
+                {inspectorTab === "changes"
+                  ? changes
+                  : inspectorTab === "agents"
+                    ? agents
+                    : terminal}
               </div>
             </aside>
           </>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AgentNode } from "@contracts/agents";
 import type {
   FileDiffMode,
   FileDiffResponse,
@@ -10,6 +11,9 @@ import {
   fetchFileDiff,
   fetchRawFile,
   fetchSessionChanges,
+  fetchWorkspaceChanges,
+  fetchWorkspaceFileDiff,
+  fetchWorkspaceRawFile,
   revertFileChange,
 } from "../api.ts";
 
@@ -25,9 +29,13 @@ function computeSummary(files: SessionFileChange[]): SessionChangesSummary {
 
 export function useChanges({
   activeSessionId,
+  reviewCwd,
+  agents = [],
   isDesktop,
 }: {
   activeSessionId?: string;
+  reviewCwd?: string;
+  agents?: AgentNode[];
   isDesktop: boolean;
 }) {
   const [mode, setMode] = useState<FileDiffMode>("session");
@@ -58,9 +66,29 @@ export function useChanges({
   }, []);
 
   const refreshList = useCallback(
-    async (targetSessionId = activeSessionId, targetMode = mode) => {
+    async (
+      targetSessionId = activeSessionId,
+      targetMode = mode,
+      targetReviewCwd = reviewCwd,
+    ) => {
       if (!targetSessionId) {
-        setFiles([]);
+        if (!targetReviewCwd) {
+          setFiles([]);
+          return;
+        }
+        setLoadingList(true);
+        try {
+          const res = await fetchWorkspaceChanges(targetReviewCwd);
+          setFiles(res.files);
+          setSelectedPath((prev) => {
+            if (prev && res.files.some((f) => f.path === prev)) return prev;
+            return res.files[0]?.path ?? null;
+          });
+        } catch (e) {
+          setError((e as Error).message);
+        } finally {
+          setLoadingList(false);
+        }
         return;
       }
       setLoadingList(true);
@@ -77,10 +105,10 @@ export function useChanges({
         setLoadingList(false);
       }
     },
-    [activeSessionId, mode],
+    [activeSessionId, mode, reviewCwd],
   );
 
-  // Reset and fetch changes when session or mode changes.
+  // Reset and fetch changes when session, reviewCwd, or mode changes.
   useEffect(() => {
     setError(null);
     setDiff(null);
@@ -91,17 +119,17 @@ export function useChanges({
       setSelectedRevId(null);
       setContributorFilter("all");
     }
-    if (!activeSessionId) {
+    if (!activeSessionId && !reviewCwd) {
       setFiles([]);
       setSelectedPath(null);
       return;
     }
-    void refreshList(activeSessionId, mode);
-  }, [activeSessionId, mode, refreshList]);
+    void refreshList(activeSessionId, mode, reviewCwd);
+  }, [activeSessionId, mode, refreshList, reviewCwd]);
 
   // Fetch diff or raw file whenever selection / mode / revId / viewMode changes.
   const loadDetail = useCallback(async () => {
-    if (!activeSessionId || !selectedPath) {
+    if ((!activeSessionId && !reviewCwd) || !selectedPath) {
       setDiff(null);
       setRawFile(null);
       return;
@@ -109,24 +137,32 @@ export function useChanges({
     setLoadingDetail(true);
     setError(null);
     try {
-      if (viewMode === "raw") {
-        const raw = await fetchRawFile(activeSessionId, selectedPath);
-        setRawFile(raw);
-      } else {
-        const d = await fetchFileDiff(
-          activeSessionId,
-          selectedPath,
-          mode,
-          mode === "session" ? (selectedRevId ?? undefined) : undefined,
-        );
-        setDiff(d);
+      if (!activeSessionId && reviewCwd) {
+        if (viewMode === "raw") {
+          setRawFile(await fetchWorkspaceRawFile(selectedPath, reviewCwd));
+        } else {
+          setDiff(await fetchWorkspaceFileDiff(selectedPath, reviewCwd));
+        }
+      } else if (activeSessionId) {
+        if (viewMode === "raw") {
+          const raw = await fetchRawFile(activeSessionId, selectedPath);
+          setRawFile(raw);
+        } else {
+          const d = await fetchFileDiff(
+            activeSessionId,
+            selectedPath,
+            mode,
+            mode === "session" ? (selectedRevId ?? undefined) : undefined,
+          );
+          setDiff(d);
+        }
       }
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoadingDetail(false);
     }
-  }, [activeSessionId, mode, selectedPath, selectedRevId, viewMode]);
+  }, [activeSessionId, mode, reviewCwd, selectedPath, selectedRevId, viewMode]);
 
   useEffect(() => {
     void loadDetail();
@@ -186,17 +222,23 @@ export function useChanges({
 
   const contributorOptions = useMemo(() => {
     const keys = new Map<string, string>();
+    const agentRoleFor = (agentId: string) =>
+      agents.find((a) => a.agentId === agentId)?.role ?? agentId.slice(0, 8);
     for (const f of files) {
       for (const c of f.contributors) {
         keys.set(`harness:${c.harnessId}`, `Harness: ${c.harnessId}`);
         keys.set(`model:${c.model}`, `Model: ${c.model}`);
         if (c.agentId) {
-          keys.set(`agent:${c.agentId}`, `Agent: ${c.agentId.slice(0, 8)}`);
+          keys.set(`agent:${c.agentId}`, `Agent: ${agentRoleFor(c.agentId)}`);
         }
       }
     }
+    if (contributorFilter.startsWith("agent:") && !keys.has(contributorFilter)) {
+      const targetId = contributorFilter.slice("agent:".length);
+      keys.set(contributorFilter, `Agent: ${agentRoleFor(targetId)}`);
+    }
     return [...keys.entries()].map(([value, label]) => ({ value, label }));
-  }, [files]);
+  }, [agents, contributorFilter, files]);
 
   const filteredFiles = useMemo(() => {
     if (contributorFilter === "all") return files;

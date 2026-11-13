@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AgentNode } from "@contracts/agents";
 import type { SessionInfo, SessionOrigin } from "@contracts/chat";
 import {
   deleteSession,
@@ -17,7 +18,9 @@ function sortSessions(items: SessionInfo[]): SessionInfo[] {
   return [...items].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
 }
 
-export function useSessions() {
+export function useSessions(options?: {
+  onAgentUpdated?: (sessionId: string, agent: AgentNode) => void;
+}) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +29,8 @@ export function useSessions() {
     cwd: "",
     q: "",
   });
+  const onAgentUpdatedRef = useRef(options?.onAgentUpdated);
+  onAgentUpdatedRef.current = options?.onAgentUpdated;
 
   useEffect(() => {
     let active = true;
@@ -55,6 +60,8 @@ export function useSessions() {
       } else if (event.type === "delete" && event.sessionId) {
         const deletedId = event.sessionId;
         setSessions((prev) => prev.filter((s) => s.id !== deletedId));
+      } else if (event.type === "agent_updated" && event.sessionId && event.agent) {
+        onAgentUpdatedRef.current?.(event.sessionId, event.agent);
       }
     });
 

@@ -60,6 +60,9 @@ export interface ChangesPanelProps {
   error: string | null;
   onRefresh: () => void;
   onRevert: (path: string) => Promise<void>;
+  worktreeBranch?: string;
+  canRevert?: boolean;
+  lockGitMode?: boolean;
 }
 
 export default function ChangesPanel({
@@ -86,6 +89,9 @@ export default function ChangesPanel({
   error,
   onRefresh,
   onRevert,
+  worktreeBranch,
+  canRevert = true,
+  lockGitMode = false,
 }: ChangesPanelProps) {
   const { t } = useTranslation();
   const [copiedPath, setCopiedPath] = useState(false);
@@ -116,22 +122,24 @@ export default function ChangesPanel({
       <div className="space-y-2 border-b border-[var(--border-subtle)] p-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="inline-flex rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-0.5 text-[11px]">
-            <button
-              type="button"
-              onClick={() => onModeChange("session")}
-              className={`rounded px-2 py-0.5 font-medium transition-colors ${
-                mode === "session"
-                  ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-xs"
-                  : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-              }`}
-            >
-              {t("changesModeSession")}
-            </button>
+            {!lockGitMode && (
+              <button
+                type="button"
+                onClick={() => onModeChange("session")}
+                className={`rounded px-2 py-0.5 font-medium transition-colors ${
+                  mode === "session"
+                    ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-xs"
+                    : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                {t("changesModeSession")}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onModeChange("git")}
               className={`rounded px-2 py-0.5 font-medium transition-colors ${
-                mode === "git"
+                mode === "git" || lockGitMode
                   ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-xs"
                   : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
               }`}
@@ -141,6 +149,11 @@ export default function ChangesPanel({
           </div>
 
           <div className="flex items-center gap-2 font-mono text-[11px]">
+            {worktreeBranch && (
+              <span className="rounded bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">
+                {t("worktreeBadge", { branch: worktreeBranch })}
+              </span>
+            )}
             <span className="text-[var(--text-secondary)]">
               {t("changesSummary", { count: summary.filesCount })}
             </span>
@@ -256,14 +269,16 @@ export default function ChangesPanel({
                 >
                   {copiedPath ? t("changesCopiedPath") : t("changesCopyPath")}
                 </button>
-                <button
-                  type="button"
-                  disabled={reverting}
-                  onClick={() => setConfirmRevertPath(selectedPath)}
-                  className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-0.5 text-[10px] font-medium text-rose-700 hover:bg-rose-500/20 disabled:opacity-50 dark:text-rose-300"
-                >
-                  {reverting ? t("changesReverting") : t("changesRevert")}
-                </button>
+                {canRevert && (
+                  <button
+                    type="button"
+                    disabled={reverting}
+                    onClick={() => setConfirmRevertPath(selectedPath)}
+                    className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-0.5 text-[10px] font-medium text-rose-700 hover:bg-rose-500/20 disabled:opacity-50 dark:text-rose-300"
+                  >
+                    {reverting ? t("changesReverting") : t("changesRevert")}
+                  </button>
+                )}
               </div>
             </div>
 
