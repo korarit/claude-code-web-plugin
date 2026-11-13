@@ -7,6 +7,17 @@ import type {
   SessionChangesSummary,
   SessionFileChange,
 } from "@contracts/changes";
+import { Badge } from "@/components/ui/badge.tsx";
+import { Button } from "@/components/ui/button.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog.tsx";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 import type { DiffViewMode } from "../hooks/useChanges.ts";
 import DiffViewer from "./DiffViewer.tsx";
@@ -121,52 +132,39 @@ export default function ChangesPanel({
       {/* Mode + Summary + Filter bar */}
       <div className="space-y-2 border-b border-[var(--border-subtle)] p-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="inline-flex rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-0.5 text-[11px]">
-            {!lockGitMode && (
-              <button
-                type="button"
-                onClick={() => onModeChange("session")}
-                className={`rounded px-2 py-0.5 font-medium transition-colors ${
-                  mode === "session"
-                    ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-xs"
-                    : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                }`}
-              >
-                {t("changesModeSession")}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => onModeChange("git")}
-              className={`rounded px-2 py-0.5 font-medium transition-colors ${
-                mode === "git" || lockGitMode
-                  ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-xs"
-                  : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-              }`}
-            >
-              {t("changesModeGit")}
-            </button>
-          </div>
+          <Tabs
+            value={lockGitMode ? "git" : mode}
+            onValueChange={(v) => onModeChange(v as FileDiffMode)}
+          >
+            <TabsList>
+              {!lockGitMode && (
+                <TabsTrigger value="session">{t("changesModeSession")}</TabsTrigger>
+              )}
+              <TabsTrigger value="git">{t("changesModeGit")}</TabsTrigger>
+            </TabsList>
+          </Tabs>
 
           <div className="flex items-center gap-2 font-mono text-[11px]">
             {worktreeBranch && (
-              <span className="rounded bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">
+              <Badge variant="indigo">
                 {t("worktreeBadge", { branch: worktreeBranch })}
-              </span>
+              </Badge>
             )}
             <span className="text-[var(--text-secondary)]">
               {t("changesSummary", { count: summary.filesCount })}
             </span>
             <span className="text-emerald-600 dark:text-emerald-400">+{summary.totalAdditions}</span>
             <span className="text-rose-600 dark:text-rose-400">-{summary.totalDeletions}</span>
-            <button
+            <Button
               type="button"
+              size="xs"
+              variant="outline"
               onClick={onRefresh}
               disabled={loadingList}
-              className="rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-1.5 py-0.5 font-sans text-[10px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50"
+              className="font-sans"
             >
               {t("changesRefresh")}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -195,7 +193,9 @@ export default function ChangesPanel({
       {/* File List */}
       <div className="max-h-44 shrink-0 overflow-y-auto border-b border-[var(--border-subtle)] bg-[var(--bg-canvas)]/50 p-1.5">
         {loadingList && files.length === 0 ? (
-          <div className="px-2 py-3 text-center text-xs text-[var(--text-muted)]">...</div>
+          <div className="px-2 py-3 text-center text-xs text-[var(--text-muted)]">
+            {t("loadingText")}
+          </div>
         ) : files.length === 0 ? (
           <div className="px-2 py-3 text-center text-xs text-[var(--text-muted)]">
             {mode === "git" ? t("changesEmptyGit") : t("changesEmptySession")}
@@ -309,41 +309,19 @@ export default function ChangesPanel({
                 <span />
               )}
 
-              <div className="inline-flex shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-0.5 text-[10px]">
-                <button
-                  type="button"
-                  onClick={() => onViewModeChange("unified")}
-                  className={`rounded px-2 py-0.5 font-medium ${
-                    viewMode === "unified"
-                      ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                      : "text-[var(--text-muted)]"
-                  }`}
-                >
-                  {t("changesViewUnified")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onViewModeChange("split")}
-                  className={`rounded px-2 py-0.5 font-medium ${
-                    viewMode === "split"
-                      ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                      : "text-[var(--text-muted)]"
-                  }`}
-                >
-                  {t("changesViewSplit")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onViewModeChange("raw")}
-                  className={`rounded px-2 py-0.5 font-medium ${
-                    viewMode === "raw"
-                      ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                      : "text-[var(--text-muted)]"
-                  }`}
-                >
-                  {t("changesViewRaw")}
-                </button>
-              </div>
+              <Tabs value={viewMode} onValueChange={(v) => onViewModeChange(v as DiffViewMode)}>
+                <TabsList className="text-[10px]">
+                  <TabsTrigger value="unified" className="px-2 py-0.5 text-[10px]">
+                    {t("changesViewUnified")}
+                  </TabsTrigger>
+                  <TabsTrigger value="split" className="px-2 py-0.5 text-[10px]">
+                    {t("changesViewSplit")}
+                  </TabsTrigger>
+                  <TabsTrigger value="raw" className="px-2 py-0.5 text-[10px]">
+                    {t("changesViewRaw")}
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
             </div>
           </div>
 
@@ -361,44 +339,40 @@ export default function ChangesPanel({
         </div>
       )}
 
-      {confirmRevertPath && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="w-full max-w-sm rounded-lg border border-[var(--border-strong)] bg-[var(--bg-surface)] p-4 shadow-xl">
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-              {t("changesRevertTitle")}
-            </h3>
-            <p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">
-              {mode === "git"
-                ? t("changesRevertBodyGit", { path: confirmRevertPath })
-                : t("changesRevertBodySession", { path: confirmRevertPath })}
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirmRevertPath(null)}
-                className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)]"
-              >
-                {t("cancel")}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const target = confirmRevertPath;
-                  setConfirmRevertPath(null);
-                  void onRevert(target);
-                }}
-                className="rounded-md bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700"
-              >
-                {t("changesConfirmRevert")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Dialog
+        open={Boolean(confirmRevertPath)}
+        onOpenChange={(open) => !open && setConfirmRevertPath(null)}
+      >
+        <DialogContent className="max-w-sm" closeLabel={t("closeDialog")}>
+          <DialogHeader>
+            <DialogTitle>{t("changesRevertTitle")}</DialogTitle>
+            <DialogDescription>
+              {confirmRevertPath
+                ? mode === "git"
+                  ? t("changesRevertBodyGit", { path: confirmRevertPath })
+                  : t("changesRevertBodySession", { path: confirmRevertPath })
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConfirmRevertPath(null)}>
+              {t("cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                if (!confirmRevertPath) return;
+                const target = confirmRevertPath;
+                setConfirmRevertPath(null);
+                void onRevert(target);
+              }}
+            >
+              {t("changesConfirmRevert")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

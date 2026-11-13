@@ -15,6 +15,7 @@ import {
   type SessionStatus,
   type WorkspaceFileEntry,
 } from "@contracts/chat";
+import { Badge } from "@/components/ui/badge.tsx";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 import { getAgentStateMeta } from "../agentStateMeta.ts";
 import { fetchWorkspaceFiles } from "../api.ts";
@@ -504,7 +505,11 @@ export default function ChatPanel({
                 className="flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left font-mono text-xs text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]"
               >
                 <span className="truncate">{f.path}</span>
-                {f.isDir && <span className="text-[10px] text-[var(--text-muted)]">dir</span>}
+                {f.isDir && (
+                  <span className="text-[10px] text-[var(--text-muted)]">
+                    {t("directoryBadge")}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -644,7 +649,8 @@ export default function ChatPanel({
                   <>
                     {(activeSession.syncSummary.largeContextWarning ||
                       activeSession.syncSummary.lastSyncStrategy === "file_sync") && (
-                      <span
+                      <Badge
+                        variant="amber"
                         title={
                           activeSession.syncSummary.lastSyncFilePath
                             ? t("syncFileSavedHint", {
@@ -652,13 +658,12 @@ export default function ChatPanel({
                               })
                             : undefined
                         }
-                        className="rounded border border-amber-500/40 bg-amber-500/12 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-200"
                       >
                         {t("syncLargeContextBadge")}
-                      </span>
+                      </Badge>
                     )}
                     {activeSession.syncSummary.pendingSyncCount > 0 ? (
-                      <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                      <Badge variant="amber">
                         {activeSession.syncSummary.pendingSyncFromSeq !== undefined &&
                         activeSession.syncSummary.pendingSyncToSeq !== undefined
                           ? t("syncStatusPendingRange", {
@@ -668,27 +673,19 @@ export default function ChatPanel({
                           : t("syncStatusPending", {
                               count: activeSession.syncSummary.pendingSyncCount,
                             })}
-                      </span>
+                      </Badge>
                     ) : (
                       (Object.keys(activeSession.syncSummary.bindings).length > 1 ||
                         activeSession.syncSummary.latestSeq > 0) && (
-                        <span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
-                          {t("syncStatusSynced")}
-                        </span>
+                        <Badge variant="emerald">{t("syncStatusSynced")}</Badge>
                       )
                     )}
                   </>
                 )}
 
-                <span
-                  className={`rounded px-2 py-0.5 text-[11px] font-medium ${
-                    effectiveAuthMode === "api_key"
-                      ? "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300"
-                      : "bg-[var(--bg-elevated)] text-[var(--text-secondary)]"
-                  }`}
-                >
+                <Badge variant={effectiveAuthMode === "api_key" ? "indigo" : "secondary"}>
                   {effectiveAuthMode === "api_key" ? t("authApiKey") : t("authMachineDefault")}
-                </span>
+                </Badge>
                 {activeSession.agentProfile && (
                   <span className="rounded bg-[var(--bg-elevated)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-secondary)]">
                     @{activeSession.agentProfile}
@@ -716,7 +713,7 @@ export default function ChatPanel({
                 onClick={() => setSlashOpen((v) => !v)}
                 className="rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-40"
               >
-                /cmd
+                {t("slashButtonLabel")}
               </button>
               <button
                 type="button"
@@ -724,7 +721,7 @@ export default function ChatPanel({
                 onClick={() => onDraftChange(`${draft}${draft && !draft.endsWith(" ") ? " " : ""}@`)}
                 className="rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-40"
               >
-                @file
+                {t("mentionButtonLabel")}
               </button>
               <button
                 type="button"

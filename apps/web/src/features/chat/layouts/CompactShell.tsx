@@ -1,5 +1,15 @@
 import type { ReactNode } from "react";
 import type { SessionInfo } from "@contracts/chat";
+import { Menu, Plus, Search } from "lucide-react";
+import { Button } from "@/components/ui/button.tsx";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet.tsx";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 import type { UsageState } from "../hooks/useChat.ts";
 import ContextBar from "../components/ContextBar.tsx";
@@ -19,6 +29,7 @@ export interface CompactShellProps {
   onDrawerOpenChange: (open: boolean) => void;
   activeTab: CompactViewTab;
   onTabChange: (tab: CompactViewTab) => void;
+  onOpenCommandPalette: () => void;
   soundMuted: boolean;
   onToggleSound: () => void;
   onNewSession: () => void;
@@ -29,6 +40,7 @@ export interface CompactShellProps {
   terminal: ReactNode;
 }
 
+/** Compact (< 1280px) single-focus layout with Sheet drawer and bottom tab bar. */
 export default function CompactShell({
   activeSession,
   usage,
@@ -39,6 +51,7 @@ export default function CompactShell({
   onDrawerOpenChange,
   activeTab,
   onTabChange,
+  onOpenCommandPalette,
   soundMuted,
   onToggleSound,
   onNewSession,
@@ -54,17 +67,19 @@ export default function CompactShell({
     <div className="flex h-dvh flex-col overflow-hidden bg-[var(--bg-canvas)] text-[var(--text-primary)]">
       <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3">
         <div className="flex min-w-0 items-center gap-2">
-          <button
+          <Button
             type="button"
+            size="icon"
+            variant="secondary"
             onClick={() => onDrawerOpenChange(true)}
             aria-label={t("openSidebar")}
-            className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-sm text-[var(--text-primary)]"
+            className="relative shrink-0"
           >
-            <span>☰</span>
+            <Menu className="h-4 w-4" />
             {hasBackgroundActivity && (
               <span className="absolute -top-1 -right-1 h-2.5 w-2.5 animate-pulse rounded-full bg-amber-500 ring-2 ring-[var(--bg-surface)]" />
             )}
-          </button>
+          </Button>
 
           <span className="truncate text-xs font-semibold text-[var(--text-primary)]">
             {activeSession?.title || activeSession?.lastMessagePreview || t("appName")}
@@ -77,13 +92,24 @@ export default function CompactShell({
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
-          <button
+          <Button
             type="button"
-            onClick={onNewSession}
-            className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1 text-[11px] font-medium text-[var(--text-primary)]"
+            size="icon"
+            variant="outline"
+            onClick={onOpenCommandPalette}
+            aria-label={t("commandPaletteAriaLabel")}
           >
-            +
-          </button>
+            <Search className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant="secondary"
+            onClick={onNewSession}
+            aria-label={t("newSession")}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
           <SoundToggle muted={soundMuted} onToggle={onToggleSound} />
           <ThemeSwitcher />
         </div>
@@ -91,87 +117,45 @@ export default function CompactShell({
 
       <ContextBar usage={usage} variant="strip" />
 
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        {activeTab === "chat" ? (
-          chat
-        ) : activeTab === "changes" ? (
-          <div className="min-w-0 flex-1 overflow-hidden">{changes}</div>
-        ) : activeTab === "agents" ? (
-          <div className="min-w-0 flex-1 overflow-hidden">{agents}</div>
-        ) : (
-          <div className="min-w-0 flex-1 overflow-hidden">{terminal}</div>
-        )}
-      </div>
-
-      <nav className="flex h-12 shrink-0 items-center border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] pb-[env(safe-area-inset-bottom)]">
-        <button
-          type="button"
-          onClick={() => onTabChange("chat")}
-          className={`flex-1 py-2 text-xs font-semibold ${
-            activeTab === "chat"
-              ? "text-[var(--text-primary)]"
-              : "text-[var(--text-muted)]"
-          }`}
-        >
-          {t("chatTab")}
-        </button>
-        <button
-          type="button"
-          onClick={() => onTabChange("changes")}
-          className={`flex-1 py-2 text-xs font-semibold ${
-            activeTab === "changes"
-              ? "text-[var(--text-primary)]"
-              : "text-[var(--text-muted)]"
-          }`}
-        >
-          {t("changesTab", { count: changesCount })}
-        </button>
-        <button
-          type="button"
-          onClick={() => onTabChange("agents")}
-          className={`flex-1 py-2 text-xs font-semibold ${
-            activeTab === "agents"
-              ? "text-[var(--text-primary)]"
-              : "text-[var(--text-muted)]"
-          }`}
-        >
-          {t("agentsTab", { count: agentsCount })}
-        </button>
-        <button
-          type="button"
-          onClick={() => onTabChange("terminal")}
-          className={`flex-1 py-2 text-xs font-semibold ${
-            activeTab === "terminal"
-              ? "text-[var(--text-primary)]"
-              : "text-[var(--text-muted)]"
-          }`}
-        >
-          {t("terminalTab")}
-        </button>
-      </nav>
-
-      {drawerOpen && (
-        <div className="fixed inset-0 z-40 flex">
-          <div className="h-full w-[85vw] max-w-[320px] border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
-              <span className="text-xs font-semibold">{t("sessions")}</span>
-              <button
-                type="button"
-                onClick={() => onDrawerOpenChange(false)}
-                aria-label={t("closeSidebar")}
-                className="rounded px-2 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-elevated)]"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="h-[calc(100%-37px)]">{sidebar}</div>
-          </div>
-          <div
-            className="flex-1 bg-black/45"
-            onClick={() => onDrawerOpenChange(false)}
-          />
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => onTabChange(v as CompactViewTab)}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <TabsContent value="chat">{chat}</TabsContent>
+          <TabsContent value="changes">{changes}</TabsContent>
+          <TabsContent value="agents">{agents}</TabsContent>
+          <TabsContent value="terminal">{terminal}</TabsContent>
         </div>
-      )}
+
+        <nav className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2 py-1 pb-[max(0.25rem,env(safe-area-inset-bottom))]">
+          <TabsList className="grid w-full grid-cols-4 border-0 bg-transparent p-0">
+            <TabsTrigger value="chat" className="py-2 text-xs font-semibold">
+              {t("chatTab")}
+            </TabsTrigger>
+            <TabsTrigger value="changes" className="py-2 text-xs font-semibold">
+              {t("changesTab", { count: changesCount })}
+            </TabsTrigger>
+            <TabsTrigger value="agents" className="py-2 text-xs font-semibold">
+              {t("agentsTab", { count: agentsCount })}
+            </TabsTrigger>
+            <TabsTrigger value="terminal" className="py-2 text-xs font-semibold">
+              {t("terminalTab")}
+            </TabsTrigger>
+          </TabsList>
+        </nav>
+      </Tabs>
+
+      <Sheet open={drawerOpen} onOpenChange={onDrawerOpenChange}>
+        <SheetContent side="left" className="p-0" closeLabel={t("closeSidebar")}>
+          <SheetHeader>
+            <SheetTitle>{t("sessions")}</SheetTitle>
+            <SheetDescription>{t("activeSessions")}</SheetDescription>
+          </SheetHeader>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{sidebar}</div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

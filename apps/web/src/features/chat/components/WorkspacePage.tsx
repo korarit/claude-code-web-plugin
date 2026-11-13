@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentNode } from "@contracts/agents";
-import type { SessionStatus } from "@contracts/chat";
+import { AVAILABLE_MODELS, type ModelId, type SessionStatus } from "@contracts/chat";
 import {
   loadSoundMuted,
   playAttentionSound,
@@ -19,6 +19,7 @@ import { useWorktrees } from "../hooks/useWorktrees.ts";
 import AgentBoard from "./AgentBoard.tsx";
 import ChangesPanel from "./ChangesPanel.tsx";
 import ChatPanel from "./ChatPanel.tsx";
+import CommandPalette from "./CommandPalette.tsx";
 import SessionSidebar from "./SessionSidebar.tsx";
 import TerminalPanel from "./TerminalPanel.tsx";
 import WorktreeModal from "./WorktreeModal.tsx";
@@ -64,6 +65,7 @@ export default function WorkspacePage() {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<DesktopInspectorTab>("changes");
   const [compactTab, setCompactTab] = useState<CompactViewTab>("chat");
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [worktreeModalOpen, setWorktreeModalOpen] = useState(false);
   const [reviewWorktreeCwd, setReviewWorktreeCwd] = useState<string | undefined>(undefined);
   const [soundMuted, setSoundMuted] = useState<boolean>(() => loadSoundMuted());
@@ -505,6 +507,77 @@ export default function WorkspacePage() {
     />
   );
 
+  const effectiveHarnessId = activeSession?.harnessId ?? chat.harnessId;
+  const activeHarnessDescriptor = harnesses.find((h) => h.id === effectiveHarnessId);
+  const modelOptions = useMemo(() => {
+    const base =
+      activeHarnessDescriptor && activeHarnessDescriptor.models.length > 0
+        ? [...activeHarnessDescriptor.models]
+        : [...AVAILABLE_MODELS];
+    if (chat.model && !base.includes(chat.model)) {
+      base.unshift(chat.model);
+    }
+    return base as ModelId[];
+  }, [activeHarnessDescriptor, chat.model]);
+
+  const isBusy = chat.status === "running" || chat.status === "waiting_permission";
+  const isMirror = activeSession?.controlMode === "mirror";
+  const canSwitchHarness = activeSession
+    ? (isMirror || !isBusy) && !chat.sending && !chat.switchingHarness && !isSubagentView
+    : !chat.sending;
+  const canSwitchModel = !isBusy && !chat.sending && !isMirror;
+
+  const handleOpenInspector = useCallback(
+    (tab: "changes" | "agents" | "terminal") => {
+      if (isDesktop) {
+        if (inspectorOpen && inspectorTab === tab) {
+          setInspectorOpen(false);
+        } else {
+          setInspectorTab(tab);
+          setInspectorOpen(true);
+        }
+      } else {
+        setCompactTab(tab);
+      }
+    },
+    [inspectorOpen, inspectorTab, isDesktop],
+  );
+
+  const commandPalette = (
+    <CommandPalette
+      open={commandPaletteOpen}
+      onOpenChange={setCommandPaletteOpen}
+      sessions={activeSessions}
+      activeSession={activeSession}
+      harnesses={harnesses}
+      currentHarnessId={effectiveHarnessId}
+      currentModel={chat.model}
+      modelOptions={modelOptions}
+      canSwitchHarness={canSwitchHarness}
+      canSwitchModel={canSwitchModel}
+      soundMuted={soundMuted}
+      onSelectSession={(id) => navigateSession(id)}
+      onNewSession={() => {
+        setReviewWorktreeCwd(undefined);
+        navigateSession(undefined);
+      }}
+      onSwitchHarness={(nextHarness) => {
+        if (activeSession) {
+          void chat.switchHarness(nextHarness);
+        } else {
+          chat.setHarnessId(nextHarness);
+        }
+      }}
+      onSelectModel={(m) => void chat.setModel(m)}
+      onOpenInspector={handleOpenInspector}
+      onOpenWorktrees={() => {
+        void worktreesState.refresh(activeSession?.cwd || chat.cwd || defaultCwd);
+        setWorktreeModalOpen(true);
+      }}
+      onToggleSound={toggleSound}
+    />
+  );
+
   if (isDesktop) {
     return (
       <>
@@ -520,6 +593,7 @@ export default function WorkspacePage() {
             setInspectorOpen(true);
           }}
           onCloseInspector={() => setInspectorOpen(false)}
+          onOpenCommandPalette={() => setCommandPaletteOpen(true)}
           soundMuted={soundMuted}
           onToggleSound={toggleSound}
           onRenameSession={rename}
@@ -530,6 +604,7 @@ export default function WorkspacePage() {
           terminal={terminalNode}
         />
         {worktreeModal}
+        {commandPalette}
       </>
     );
   }
@@ -546,6 +621,7 @@ export default function WorkspacePage() {
         onDrawerOpenChange={setDrawerOpen}
         activeTab={compactTab}
         onTabChange={setCompactTab}
+        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         soundMuted={soundMuted}
         onToggleSound={toggleSound}
         onNewSession={() => navigateSession(undefined)}
@@ -556,6 +632,7 @@ export default function WorkspacePage() {
         terminal={terminalNode}
       />
       {worktreeModal}
+      {commandPalette}
     </>
   );
 }

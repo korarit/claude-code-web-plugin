@@ -1,5 +1,14 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { SessionInfo } from "@contracts/chat";
+import { Search, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge.tsx";
+import { Button } from "@/components/ui/button.tsx";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable.tsx";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 import type { UsageState } from "../hooks/useChat.ts";
 import ContextBar from "../components/ContextBar.tsx";
@@ -18,6 +27,7 @@ export interface DesktopShellProps {
   inspectorTab: DesktopInspectorTab;
   onSelectInspectorTab: (tab: DesktopInspectorTab) => void;
   onCloseInspector: () => void;
+  onOpenCommandPalette: () => void;
   soundMuted: boolean;
   onToggleSound: () => void;
   onRenameSession?: (sessionId: string, title: string) => Promise<unknown>;
@@ -28,6 +38,7 @@ export interface DesktopShellProps {
   terminal: ReactNode;
 }
 
+/** Desktop (>= 1280px) 3-column workspace with resizable split panels. */
 export default function DesktopShell({
   activeSession,
   usage,
@@ -37,6 +48,7 @@ export default function DesktopShell({
   inspectorTab,
   onSelectInspectorTab,
   onCloseInspector,
+  onOpenCommandPalette,
   soundMuted,
   onToggleSound,
   onRenameSession,
@@ -49,25 +61,6 @@ export default function DesktopShell({
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
-  const [inspectorWidth, setInspectorWidth] = useState(480);
-  const draggingRef = useRef(false);
-
-  useEffect(() => {
-    const onMove = (e: MouseEvent) => {
-      if (!draggingRef.current) return;
-      const next = window.innerWidth - e.clientX;
-      setInspectorWidth(Math.min(760, Math.max(360, next)));
-    };
-    const onUp = () => {
-      draggingRef.current = false;
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, []);
 
   const displayTitle =
     activeSession?.title || activeSession?.lastMessagePreview || t("untitledSession");
@@ -117,19 +110,17 @@ export default function DesktopShell({
                     }}
                     className="w-56 rounded border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-2 py-0.5 text-xs text-[var(--text-primary)] outline-none"
                   />
-                  <button
-                    type="submit"
-                    className="rounded bg-[var(--bg-muted)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-primary)]"
-                  >
+                  <Button type="submit" size="xs" variant="secondary">
                     {t("saveName")}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    size="xs"
+                    variant="ghost"
                     onClick={() => setEditing(false)}
-                    className="rounded px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                   >
                     {t("cancel")}
-                  </button>
+                  </Button>
                 </form>
               ) : (
                 <div className="flex min-w-0 items-center gap-1.5">
@@ -137,21 +128,23 @@ export default function DesktopShell({
                     {displayTitle}
                   </span>
                   {onRenameSession && (
-                    <button
+                    <Button
                       type="button"
+                      size="xs"
+                      variant="ghost"
                       onClick={startRename}
-                      className="rounded px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                      className="h-5 px-1.5 text-[10px] text-[var(--text-muted)]"
                     >
                       {t("rename")}
-                    </button>
+                    </Button>
                   )}
                 </div>
               )}
               <div className="flex shrink-0 items-center gap-1.5">
                 <HarnessBadge harnessId={activeSession.harnessId} compact />
-                <span className="rounded bg-[var(--bg-elevated)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-muted)]">
+                <Badge variant="secondary" className="font-mono">
                   {activeSession.model}
-                </span>
+                </Badge>
               </div>
             </>
           )}
@@ -159,121 +152,114 @@ export default function DesktopShell({
 
         <div className="flex shrink-0 items-center gap-2">
           <ContextBar usage={usage} variant="inline" />
-          <button
+          <Button
             type="button"
+            size="sm"
+            variant="outline"
+            onClick={onOpenCommandPalette}
+            aria-label={t("commandPaletteAriaLabel")}
+            className="gap-1.5"
+          >
+            <Search className="h-3 w-3" />
+            <span>{t("commandPaletteButton")}</span>
+            <kbd className="rounded bg-[var(--bg-elevated)] px-1 font-mono text-[10px] text-[var(--text-muted)]">
+              {t("commandPaletteShortcut")}
+            </kbd>
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={inspectorOpen && inspectorTab === "changes" ? "secondary" : "outline"}
             onClick={() => toggleTab("changes")}
             aria-pressed={inspectorOpen && inspectorTab === "changes"}
-            className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-              inspectorOpen && inspectorTab === "changes"
-                ? "border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                : "border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            }`}
           >
             {t("changesTab", { count: changesCount })}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            size="sm"
+            variant={inspectorOpen && inspectorTab === "agents" ? "secondary" : "outline"}
             onClick={() => toggleTab("agents")}
             aria-pressed={inspectorOpen && inspectorTab === "agents"}
-            className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-              inspectorOpen && inspectorTab === "agents"
-                ? "border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                : "border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            }`}
           >
             {t("agentsTab", { count: agentsCount })}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            size="sm"
+            variant={inspectorOpen && inspectorTab === "terminal" ? "secondary" : "outline"}
             onClick={() => toggleTab("terminal")}
             aria-pressed={inspectorOpen && inspectorTab === "terminal"}
-            className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-              inspectorOpen && inspectorTab === "terminal"
-                ? "border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                : "border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            }`}
           >
             {t("terminalTab")}
-          </button>
+          </Button>
           <SoundToggle muted={soundMuted} onToggle={onToggleSound} />
           <ThemeSwitcher />
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div className="w-[260px] shrink-0 border-r border-[var(--border-subtle)]">
-          {sidebar}
-        </div>
-        <div className="flex min-w-0 flex-1">{chat}</div>
-        {inspectorOpen && (
-          <>
-            <div
-              onMouseDown={() => {
-                draggingRef.current = true;
-              }}
-              className="w-1 shrink-0 cursor-col-resize bg-[var(--border-subtle)] transition-colors hover:bg-[var(--accent-primary)]"
-              role="separator"
-              aria-orientation="vertical"
-            />
-            <aside
-              style={{ width: `${inspectorWidth}px` }}
-              className="flex min-w-0 shrink-0 flex-col bg-[var(--bg-surface)]"
-            >
-              <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-2 text-xs">
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => onSelectInspectorTab("changes")}
-                    className={`rounded px-2.5 py-1 text-[11px] font-medium ${
-                      inspectorTab === "changes"
-                        ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                        : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                    }`}
-                  >
-                    {t("changesTab", { count: changesCount })}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onSelectInspectorTab("agents")}
-                    className={`rounded px-2.5 py-1 text-[11px] font-medium ${
-                      inspectorTab === "agents"
-                        ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                        : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                    }`}
-                  >
-                    {t("agentsTab", { count: agentsCount })}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onSelectInspectorTab("terminal")}
-                    className={`rounded px-2.5 py-1 text-[11px] font-medium ${
-                      inspectorTab === "terminal"
-                        ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                        : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-                    }`}
-                  >
-                    {t("terminalTab")}
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={onCloseInspector}
-                  aria-label={t("changesCloseInspector")}
-                  className="rounded px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <ResizablePanelGroup orientation="horizontal" id="hw-desktop-layout">
+          <ResizablePanel
+            id="sidebar"
+            defaultSize={260}
+            minSize={200}
+            maxSize={380}
+            className="flex flex-col"
+          >
+            {sidebar}
+          </ResizablePanel>
+
+          <ResizableHandle />
+
+          <ResizablePanel id="chat" minSize="30%" className="flex min-w-0">
+            {chat}
+          </ResizablePanel>
+
+          {inspectorOpen && (
+            <>
+              <ResizableHandle withHandle />
+              <ResizablePanel
+                id="inspector"
+                defaultSize={460}
+                minSize={320}
+                maxSize={720}
+                className="flex min-w-0 flex-col bg-[var(--bg-surface)]"
+              >
+                <Tabs
+                  value={inspectorTab}
+                  onValueChange={(v) => onSelectInspectorTab(v as DesktopInspectorTab)}
+                  className="flex min-h-0 flex-1 flex-col"
                 >
-                  ✕
-                </button>
-              </div>
-              <div className="min-h-0 flex-1">
-                {inspectorTab === "changes"
-                  ? changes
-                  : inspectorTab === "agents"
-                    ? agents
-                    : terminal}
-              </div>
-            </aside>
-          </>
-        )}
+                  <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-2 text-xs">
+                    <TabsList>
+                      <TabsTrigger value="changes">
+                        {t("changesTab", { count: changesCount })}
+                      </TabsTrigger>
+                      <TabsTrigger value="agents">
+                        {t("agentsTab", { count: agentsCount })}
+                      </TabsTrigger>
+                      <TabsTrigger value="terminal">{t("terminalTab")}</TabsTrigger>
+                    </TabsList>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      onClick={onCloseInspector}
+                      aria-label={t("changesCloseInspector")}
+                      className="h-6 w-6 p-0"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  <TabsContent value="changes">{changes}</TabsContent>
+                  <TabsContent value="agents">{agents}</TabsContent>
+                  <TabsContent value="terminal">{terminal}</TabsContent>
+                </Tabs>
+              </ResizablePanel>
+            </>
+          )}
+        </ResizablePanelGroup>
       </div>
     </div>
   );

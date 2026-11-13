@@ -1,5 +1,14 @@
 import { useState } from "react";
 import type { GitWorktreeInfo, MergeWorktreeResponse } from "@contracts/workspace";
+import { Badge } from "@/components/ui/badge.tsx";
+import { Button } from "@/components/ui/button.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog.tsx";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 
 export interface WorktreeModalProps {
@@ -17,6 +26,7 @@ export interface WorktreeModalProps {
   onRemove: (worktreePath: string) => Promise<unknown>;
 }
 
+/** Modal dialog for creating, selecting, reviewing, merging, and removing Git worktrees. */
 export default function WorktreeModal({
   open,
   repoRoot,
@@ -39,8 +49,6 @@ export default function WorktreeModal({
     path: string;
     kind: "merge" | "remove";
   } | null>(null);
-
-  if (!open) return null;
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,29 +97,15 @@ export default function WorktreeModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
-      role="dialog"
-      aria-modal="true"
-    >
-      <div className="flex max-h-[85dvh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--bg-surface)] shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b border-[var(--border-subtle)] px-4 py-3">
-          <div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-              {t("worktreeModalTitle")}
-            </h3>
-            <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">
-              {t("worktreeModalSubtitle")}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded px-2 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
-          >
-            ✕
-          </button>
-        </div>
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+      <DialogContent
+        className="flex max-h-[85dvh] max-w-xl flex-col gap-0 overflow-hidden p-0"
+        closeLabel={t("closeDialog")}
+      >
+        <DialogHeader className="border-b border-[var(--border-subtle)] px-4 py-3 pr-10">
+          <DialogTitle>{t("worktreeModalTitle")}</DialogTitle>
+          <DialogDescription>{t("worktreeModalSubtitle")}</DialogDescription>
+        </DialogHeader>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
           {error && (
@@ -164,13 +158,9 @@ export default function WorktreeModal({
                   </label>
                 </div>
                 <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={busy || !branch.trim()}
-                    className="rounded-md bg-[var(--accent-primary)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-primary-fg)] disabled:opacity-50"
-                  >
+                  <Button type="submit" disabled={busy || !branch.trim()}>
                     {busy ? t("worktreeCreating") : t("worktreeCreateButton")}
-                  </button>
+                  </Button>
                 </div>
               </form>
 
@@ -192,19 +182,11 @@ export default function WorktreeModal({
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex min-w-0 items-center gap-1.5">
-                            <span className="rounded bg-[var(--bg-muted)] px-1.5 py-0.5 font-mono text-[11px] font-semibold text-[var(--text-primary)]">
+                            <Badge className="font-mono text-[11px] font-semibold text-[var(--text-primary)]">
                               {wt.branch ?? wt.head.slice(0, 7)}
-                            </span>
-                            {wt.isMain && (
-                              <span className="rounded bg-indigo-500/15 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">
-                                {t("worktreeMainBadge")}
-                              </span>
-                            )}
-                            {isSelected && (
-                              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
-                                {t("worktreeSelected")}
-                              </span>
-                            )}
+                            </Badge>
+                            {wt.isMain && <Badge variant="indigo">{t("worktreeMainBadge")}</Badge>}
+                            {isSelected && <Badge variant="emerald">{t("worktreeSelected")}</Badge>}
                           </div>
                           <span className="font-mono text-[10px] text-[var(--text-muted)]">
                             {wt.head.slice(0, 7)}
@@ -214,26 +196,28 @@ export default function WorktreeModal({
                           {wt.path}
                         </div>
                         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                          <button
+                          <Button
                             type="button"
+                            size="xs"
+                            variant="secondary"
                             onClick={() => {
                               onSelectWorktree(wt.path);
                               onClose();
                             }}
-                            className="rounded border border-[var(--border-strong)] bg-[var(--bg-surface)] px-2.5 py-1 text-[10px] font-semibold text-[var(--text-primary)]"
                           >
                             {t("worktreeUseForSession")}
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
+                            size="xs"
+                            variant="outline"
                             onClick={() => {
                               onReviewDiff(wt.path);
                               onClose();
                             }}
-                            className="rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2 py-1 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                           >
                             {t("worktreeReviewDiff")}
-                          </button>
+                          </Button>
                           {!wt.isMain &&
                             (confirmAction?.path === wt.path ? (
                               <div className="flex flex-wrap items-center gap-1.5 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1">
@@ -244,19 +228,21 @@ export default function WorktreeModal({
                                       })
                                     : t("worktreeConfirmRemove")}
                                 </span>
-                                <button
+                                <Button
                                   type="button"
+                                  size="xs"
                                   disabled={busy}
+                                  variant={confirmAction.kind === "merge" ? "default" : "destructive"}
+                                  className={
+                                    confirmAction.kind === "merge"
+                                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                                      : undefined
+                                  }
                                   onClick={() =>
                                     confirmAction.kind === "merge"
                                       ? void handleMerge(wt)
                                       : void handleRemove(wt.path)
                                   }
-                                  className={`rounded px-2 py-0.5 text-[10px] font-semibold text-white disabled:opacity-50 ${
-                                    confirmAction.kind === "merge"
-                                      ? "bg-emerald-600 hover:bg-emerald-700"
-                                      : "bg-rose-600 hover:bg-rose-700"
-                                  }`}
                                 >
                                   {confirmAction.kind === "merge"
                                     ? busy
@@ -265,38 +251,43 @@ export default function WorktreeModal({
                                     : busy
                                       ? t("worktreeRemoving")
                                       : t("worktreeConfirmRemove")}
-                                </button>
-                                <button
+                                </Button>
+                                <Button
                                   type="button"
+                                  size="xs"
+                                  variant="outline"
                                   disabled={busy}
                                   onClick={() => setConfirmAction(null)}
-                                  className="rounded border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
                                 >
                                   {t("cancel")}
-                                </button>
+                                </Button>
                               </div>
                             ) : (
                               <>
-                                <button
+                                <Button
                                   type="button"
+                                  size="xs"
+                                  variant="outline"
                                   disabled={busy}
                                   onClick={() =>
                                     setConfirmAction({ path: wt.path, kind: "merge" })
                                   }
-                                  className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-700 hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-300"
+                                  className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300"
                                 >
                                   {busy ? t("worktreeMerging") : t("worktreeMergeAndClean")}
-                                </button>
-                                <button
+                                </Button>
+                                <Button
                                   type="button"
+                                  size="xs"
+                                  variant="outline"
                                   disabled={busy}
                                   onClick={() =>
                                     setConfirmAction({ path: wt.path, kind: "remove" })
                                   }
-                                  className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-[10px] font-medium text-rose-700 hover:bg-rose-500/20 disabled:opacity-50 dark:text-rose-300"
+                                  className="border-rose-500/40 bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 dark:text-rose-300"
                                 >
                                   {busy ? t("worktreeRemoving") : t("worktreeRemove")}
-                                </button>
+                                </Button>
                               </>
                             ))}
                         </div>
@@ -308,7 +299,7 @@ export default function WorktreeModal({
             </>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -11,7 +11,6 @@ import type {
   ChatSendRequest,
   ChatStreamEvent,
   ConcurrencyWarning,
-  ModelId,
   ResumeSessionRequest,
   SessionInfo,
   SessionOrigin,
@@ -38,7 +37,6 @@ import type {
   HarnessId,
 } from "@contracts/harness";
 import type {
-  CanonicalSessionResponse,
   SwitchHarnessRequest,
   SwitchHarnessResponse,
 } from "@contracts/sync";
@@ -77,12 +75,6 @@ export async function fetchHarnesses(): Promise<HarnessDescriptor[]> {
   const res = await fetch("/api/harnesses");
   const data = await parseApiJson<HarnessesListResponse>(res);
   return data.harnesses;
-}
-
-export async function fetchModels(): Promise<ModelId[]> {
-  const res = await fetch("/api/models");
-  const data = await parseApiJson<{ models: ModelId[] }>(res);
-  return data.models;
 }
 
 export async function fetchSessions(query: SessionListQuery = {}): Promise<SessionInfo[]> {
@@ -179,19 +171,6 @@ export async function switchSessionHarness(
     },
   );
   return parseApiJson<SwitchHarnessResponse>(res);
-}
-
-export async function fetchCanonicalSession(
-  sessionId: string,
-  limit?: number,
-): Promise<CanonicalSessionResponse> {
-  const params = new URLSearchParams();
-  if (limit) params.set("limit", String(limit));
-  const qs = params.toString();
-  const res = await fetch(
-    `/api/chat/sessions/${encodeURIComponent(sessionId)}/canonical${qs ? `?${qs}` : ""}`,
-  );
-  return parseApiJson<CanonicalSessionResponse>(res);
 }
 
 export async function fetchWorkspaceFiles(

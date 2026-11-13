@@ -9,13 +9,22 @@ export interface TerminalPanelProps {
   resuming?: boolean;
 }
 
-const ACCESSORY_KEYS: { label: string; key: string }[] = [
-  { label: "Tab", key: "Tab" },
-  { label: "Esc", key: "Escape" },
-  { label: "Ctrl+C", key: "C-c" },
-  { label: "↑", key: "Up" },
-  { label: "↓", key: "Down" },
-  { label: "↵", key: "Enter" },
+const ACCESSORY_KEYS: ReadonlyArray<{
+  labelKey:
+    | "terminalAccessoryTab"
+    | "terminalAccessoryEsc"
+    | "terminalAccessoryCtrlC"
+    | "terminalAccessoryUp"
+    | "terminalAccessoryDown"
+    | "terminalAccessoryEnter";
+  key: string;
+}> = [
+  { labelKey: "terminalAccessoryTab", key: "Tab" },
+  { labelKey: "terminalAccessoryEsc", key: "Escape" },
+  { labelKey: "terminalAccessoryCtrlC", key: "C-c" },
+  { labelKey: "terminalAccessoryUp", key: "Up" },
+  { labelKey: "terminalAccessoryDown", key: "Down" },
+  { labelKey: "terminalAccessoryEnter", key: "Enter" },
 ];
 
 export default function TerminalPanel({
@@ -153,7 +162,7 @@ export default function TerminalPanel({
         ref={preRef}
         className="min-h-0 flex-1 overflow-auto bg-[#0b0d12] p-3 font-mono text-[11px] leading-relaxed text-[#e5e7eb] whitespace-pre"
       >
-        {screen || (connected ? "..." : t("terminalDisconnected"))}
+        {screen || (connected ? t("loadingText") : t("terminalDisconnected"))}
       </pre>
 
       <div className="space-y-1.5 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] p-2">
@@ -166,7 +175,7 @@ export default function TerminalPanel({
               disabled={!connected}
               className="rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1 font-mono text-[11px] font-medium text-[var(--text-primary)] hover:border-[var(--border-strong)] disabled:opacity-40"
             >
-              {item.label}
+              {t(item.labelKey)}
             </button>
           ))}
         </div>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { AgentActivityState, AgentNode, TeamTaskItem, TeamTaskStatus } from "@contracts/agents";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs.tsx";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 import { getAgentStateMeta } from "../agentStateMeta.ts";
 
@@ -69,36 +70,24 @@ export default function AgentBoard({
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-3 py-2">
         <span className="text-xs font-semibold text-[var(--text-primary)]">{t("agentsTitle")}</span>
-        <div className="inline-flex rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-0.5 text-[10px]">
-          <button
-            type="button"
-            onClick={() => setViewMode("grid")}
-            className={`rounded px-2 py-0.5 font-medium ${
-              viewMode === "grid"
-                ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                : "text-[var(--text-muted)]"
-            }`}
-          >
-            {t("agentViewGrid")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode("activity")}
-            className={`rounded px-2 py-0.5 font-medium ${
-              viewMode === "activity"
-                ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
-                : "text-[var(--text-muted)]"
-            }`}
-          >
-            {t("agentViewActivity")}
-          </button>
-        </div>
+        <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "grid" | "activity")}>
+          <TabsList className="text-[10px]">
+            <TabsTrigger value="grid" className="px-2 py-0.5 text-[10px]">
+              {t("agentViewGrid")}
+            </TabsTrigger>
+            <TabsTrigger value="activity" className="px-2 py-0.5 text-[10px]">
+              {t("agentViewActivity")}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
         {/* Agents Section */}
         {loading && agents.length === 0 ? (
-          <div className="py-6 text-center text-xs text-[var(--text-muted)]">...</div>
+          <div className="py-6 text-center text-xs text-[var(--text-muted)]">
+            {t("loadingText")}
+          </div>
         ) : agents.length === 0 ? (
           <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] p-4 text-center text-xs text-[var(--text-muted)]">
             {t("agentsEmpty")}

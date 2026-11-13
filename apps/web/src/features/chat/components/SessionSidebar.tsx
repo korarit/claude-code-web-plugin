@@ -3,6 +3,8 @@ import type { AgentActivityState, AgentNode } from "@contracts/agents";
 import type { SessionInfo, SessionOrigin } from "@contracts/chat";
 import type { HarnessId } from "@contracts/harness";
 import type { GitWorktreeInfo } from "@contracts/workspace";
+import { Badge } from "@/components/ui/badge.tsx";
+import { Button } from "@/components/ui/button.tsx";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 import type { SessionFilters } from "../hooks/useSessions.ts";
 import ConfirmDeleteModal from "./ConfirmDeleteModal.tsx";
@@ -15,13 +17,14 @@ function folderName(cwd?: string): string {
 }
 
 function StatusIndicator({ status }: { status: SessionInfo["status"] }) {
+  const { t } = useTranslation();
   if (status === "running") {
     return (
       <svg
         className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-500"
         viewBox="0 0 24 24"
         fill="none"
-        aria-label="running"
+        aria-label={t("statusRunningAria")}
       >
         <circle
           className="opacity-25"
@@ -43,7 +46,7 @@ function StatusIndicator({ status }: { status: SessionInfo["status"] }) {
     return (
       <span
         className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-amber-500 ring-2 ring-amber-500/30"
-        aria-label="waiting permission"
+        aria-label={t("statusWaitingAria")}
       />
     );
   }
@@ -230,24 +233,20 @@ export default function SessionSidebar({
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-[var(--text-muted)]">
                   <HarnessBadge harnessId={s.harnessId} compact />
-                  <span className="rounded bg-[var(--bg-muted)] px-1 py-0.5 font-medium text-[var(--text-secondary)]">
-                    {originLabel(s.origin)}
-                  </span>
-                  <span className="rounded bg-[var(--bg-muted)] px-1 py-0.5 font-mono">
-                    {s.model}
-                  </span>
+                  <Badge>{originLabel(s.origin)}</Badge>
+                  <Badge className="font-mono">{s.model}</Badge>
                   {worktreeMatch?.branch && (
-                    <span className="rounded bg-indigo-500/15 px-1 py-0.5 font-mono text-indigo-700 dark:text-indigo-300">
+                    <Badge variant="indigo" className="font-mono">
                       {t("worktreeBadge", { branch: worktreeMatch.branch })}
-                    </span>
+                    </Badge>
                   )}
                   {s.cwd && <span className="truncate">{folderName(s.cwd)}</span>}
                   <span className="ml-auto shrink-0">{formatRelativeTime(s.updatedAt)}</span>
                 </div>
                 {s.status === "waiting_permission" && (
-                  <div className="mt-1 inline-block rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                  <Badge variant="amber" className="mt-1">
                     {t("statusWaitingPermission")}
-                  </div>
+                  </Badge>
                 )}
               </button>
             )}
@@ -320,14 +319,10 @@ export default function SessionSidebar({
   return (
     <aside className="flex h-full flex-col bg-[var(--bg-surface)]">
       <div className="space-y-2 border-b border-[var(--border-subtle)] p-3">
-        <button
-          type="button"
-          onClick={onNewSession}
-          className="flex w-full items-center justify-center gap-1.5 rounded-md bg-[var(--accent-primary)] px-3 py-1.5 text-xs font-semibold text-[var(--accent-primary-fg)] transition-opacity hover:opacity-90"
-        >
+        <Button type="button" onClick={onNewSession} className="w-full">
           <span>+</span>
           <span>{t("newSession")}</span>
-        </button>
+        </Button>
 
         <input
           type="search"
