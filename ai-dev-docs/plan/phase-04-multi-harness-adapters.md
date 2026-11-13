@@ -38,14 +38,17 @@
     1. `ClaudeHarnessAdapter`:
        - Refactor จาก `tmux-runner.ts` + `jsonl-watcher.ts` (Phase 1–2)
        - Permission ผ่าน blocking `PermissionRequest` hook; Option UI (`AskUserQuestion`) ผ่าน `.jsonl` + `tmux send-keys`
+       - Subagents: ตาม `agent_transcript_path` จาก `SubagentStart` hook ส่งเข้า Subagent Tree & Drill-down (Phase 3)
     2. `AntigravityHarnessAdapter`:
        - ใช้ `tmux` run `agy` + `load-buffer`/`paste-buffer`
        - Tail `~/.gemini/antigravity-cli/brain/<convId>/.system_generated/logs/transcript.jsonl` (map `USER_INPUT`, `PLANNER_RESPONSE`, `tool_calls`, `thinking` → `DomainChatEvent`)
        - Permission ผ่าน blocking `PreToolUse` hook (รองรับ decisions: `auto_approve` / `deny` / `ask` / `force_ask` — ไม่มี `PermissionRequest` หรือ `Notification` hook แยกเหมือน Claude); Option UI ผ่าน `transcript.jsonl` + `tmux capture-pane`/`send-keys` + Terminal Drawer fallback
+       - Subagents: ตรวจจับ `invoke_subagent` จาก `transcript.jsonl` แล้ว tail `~/.gemini/antigravity-cli/brain/<subagentConvId>/.system_generated/logs/transcript.jsonl` เข้า Subagent Tree
     3. `OpenCodeHarnessAdapter`:
        - เชื่อมต่อผ่าน `opencode serve` (หรือ spawn `opencode` ใน `tmux` แล้วต่อ `opencode attach` / SSE `GET /event`)
        - Normalize SSE events (`message.*`, `session.*`, `tool.*`, `permission.asked`, `question.asked`) → `DomainChatEvent` & `PendingInteraction`
        - ส่งคำตอบ permission/question กลับผ่าน REST endpoints (`/permission`, `/question`) ของ OpenCode server โดยตรง
+       - Subagents: subscribe `/global/event` แล้วจับ child sessions ที่มี `parentID` เข้า Subagent Tree & Drill-down
   - **Registry & Endpoint:** `HarnessRegistry` + `GET /api/harnesses` คืนรายการ 3 harnesses พร้อมสถานะความพร้อมบนเครื่อง
 
 ### 3.3 Frontend (`apps/web`)

@@ -12,16 +12,25 @@
 
 ### 3.1 Subagent & Agent Team Telemetry Model
 - **แหล่งข้อมูล (Read-only observation):**
-  - `.jsonl` transcripts ของ main session และ subagent transcripts (อ้างอิง `parent_tool_use_id`, `Task` / `Agent` tool calls)
-  - Hooks: `SubagentStart`, `SubagentStop`, `TeammateIdle`, `TaskCreated`, `TaskCompleted`
+  - Hook `SubagentStart` / `SubagentStop` ที่ส่ง `agent_id`, `agent_type`, และ **`agent_transcript_path`** (`agent-{agentId}.jsonl`) → เปิด `jsonl-watcher` tail ไฟล์ของ subagent ตัวนั้นแบบ real-time แยกจากไฟล์หลัก
+  - `.jsonl` transcripts ของ main session (อ้างอิง `parent_tool_use_id`, `Task` / `Agent` tool calls) + Hooks `TeammateIdle`, `TaskCreated`, `TaskCompleted`
   - Task files ของ Claude Code Agent Teams ใน `~/.claude/tasks/<team-or-session>/`
+- **Backend Endpoint:**
+  - `GET /api/chat/sessions/:id/agents` → รายการ `AgentNode` ใน session นั้น (Main + Subagents / Teammates)
+  - `GET /api/chat/sessions/:id/agents/:agentId/events` → SSE stream เฉพาะ transcript ของ subagent ตัวนั้น (replay + live tail)
 - **Contracts (`packages/contracts`):**
-  - เพิ่ม `AgentNode` (`agentId`, `parentAgentId?`, `role`, `state: "thinking" | "reading" | "editing" | "running_cmd" | "waiting" | "idle" | "done"`, `currentTool?`, `currentTarget?`, `usage`)
+  - เพิ่ม `AgentNode` (`agentId`, `parentAgentId?`, `role`, `transcriptPath?`, `canSendInput: boolean`, `state: "thinking" | "reading" | "editing" | "running_cmd" | "waiting" | "idle" | "done"`, `currentTool?`, `currentTarget?`, `usage`)
   - เพิ่ม `TeamTaskItem` (`id`, `subject`, `owner?`, `status: "pending" | "in_progress" | "completed"`)
 
-### 3.2 Visual Multi-Agent Views (`apps/web`)
+### 3.2 Visual Multi-Agent Views & Subagent Drill-Down (`apps/web`)
+- **Subagent Tree ใน `SessionSidebar`:**
+  - แสดงรายการลูก (`↳ Codebase Researcher`, `↳ Test Runner`) แบบ Tree ใต้ Session แม่ทันทีเมื่อมีการ spawn subagent
+  - แสดง **loading spinner icon** แยกต่อ subagent ตัวที่กำลังรันอยู่ (`done ✓` เมื่อจบ)
+- **Subagent Drill-Down & Switch Back to Main:**
+  - คลิก subagent จาก Tree ใน Sidebar หรือจาก Agent Card เพื่อ **สลับหน้าแชทเข้าไปอ่านการทำงานของ subagent ตัวนั้นแบบ real-time** (เห็น thinking, tool calls, ผลลัพธ์ทั้งหมดของตัวลูก; แสดง banner `Read-only Inspector` สำหรับ subagent ที่ถูกคุมโดยตัวแม่)
+  - มีปุ่ม **`← Back to Main`** (หรือคลิกตัวแม่ใน Sidebar) เพื่อสลับกลับมาหน้า Main Session ได้ทันทีโดยไม่ขัดจังหวะการทำงานของทั้ง Main และ Subagent
 - **Agent Swimlanes / Grid View:**
-  - การ์ดต่อ 1 agent แสดงสถานะปัจจุบัน, tool ล่าสุด, token ที่ใช้, และ mini-log ของ agent ตัวนั้น (คลิกเข้าไปดูข้อความเต็มได้)
+  - การ์ดต่อ 1 agent แสดงสถานะปัจจุบัน, tool ล่าสุด, token ที่ใช้, และ mini-log ของ agent ตัวนั้น
 - **Task Board Sync:**
   - แสดง Shared Task List (`TodoWrite` + `~/.claude/tasks/`) แบบ Kanban/Checklist sync ตาม real-time
 - **Visual Activity View (Optional / Toggleable):**
@@ -39,6 +48,7 @@
 
 ## 3. Exit Criteria / Verification
 
-1. เมื่อ Claude แตก Subagents 2–3 ตัวหรือใช้ Agent Teams หน้าเว็บแสดงการ์ดแยกตาม `agentId` และอัปเดตสถานะ `reading` / `editing` / `idle` ได้ตรงตามจริง
-2. Shared Task List อัปเดตสถานะ `pending -> in_progress -> completed` ตามการทำงานจริงโดยไม่ต้องรีเฟรชหน้า
-3. สร้าง session บน git worktree แยก 2 ตัวพร้อมกัน → แก้ไฟล์คนละ branch ไม่ชนกัน → ดู diff ของแต่ละ worktree บนหน้าเว็บได้
+1. เมื่อ Claude แตก Subagents 2–3 ตัวหรือใช้ Agent Teams หน้าเว็บแสดงรายการลูกใน `SessionSidebar` (พร้อม loading icon) และการ์ดแยกตาม `agentId` พร้อมอัปเดตสถานะ `reading` / `editing` / `idle` ได้ตรงตามจริง
+2. คลิกเข้าไปดูการทำงานสดๆ ของ Subagent ตัวใดตัวหนึ่งจาก Sidebar/Card แล้วกด **`← Back to Main`** สลับกลับมาดู Main Session ได้ต่อเนื่องโดยไม่ขัดจังหวะการทำงาน
+3. Shared Task List อัปเดตสถานะ `pending -> in_progress -> completed` ตามการทำงานจริงโดยไม่ต้องรีเฟรชหน้า
+4. สร้าง session บน git worktree แยก 2 ตัวพร้อมกัน → แก้ไฟล์คนละ branch ไม่ชนกัน → ดู diff ของแต่ละ worktree บนหน้าเว็บได้
