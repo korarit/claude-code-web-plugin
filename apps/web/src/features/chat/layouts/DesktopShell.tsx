@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SessionInfo } from "@contracts/chat";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 import type { UsageState } from "../hooks/useChat.ts";
@@ -6,34 +6,63 @@ import ContextBar from "../components/ContextBar.tsx";
 import SoundToggle from "../components/SoundToggle.tsx";
 import ThemeSwitcher from "../components/ThemeSwitcher.tsx";
 
+export type DesktopInspectorTab = "changes" | "terminal";
+
 export interface DesktopShellProps {
   activeSession?: SessionInfo;
   usage: UsageState;
-  terminalOpen: boolean;
-  onToggleTerminal: () => void;
+  changesCount: number;
+  inspectorOpen: boolean;
+  inspectorTab: DesktopInspectorTab;
+  onSelectInspectorTab: (tab: DesktopInspectorTab) => void;
+  onCloseInspector: () => void;
   soundMuted: boolean;
   onToggleSound: () => void;
   onRenameSession?: (sessionId: string, title: string) => Promise<unknown>;
   sidebar: ReactNode;
   chat: ReactNode;
+  changes: ReactNode;
   terminal: ReactNode;
 }
 
 export default function DesktopShell({
   activeSession,
   usage,
-  terminalOpen,
-  onToggleTerminal,
+  changesCount,
+  inspectorOpen,
+  inspectorTab,
+  onSelectInspectorTab,
+  onCloseInspector,
   soundMuted,
   onToggleSound,
   onRenameSession,
   sidebar,
   chat,
+  changes,
   terminal,
 }: DesktopShellProps) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
+  const [inspectorWidth, setInspectorWidth] = useState(480);
+  const draggingRef = useRef(false);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!draggingRef.current) return;
+      const next = window.innerWidth - e.clientX;
+      setInspectorWidth(Math.min(760, Math.max(360, next)));
+    };
+    const onUp = () => {
+      draggingRef.current = false;
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
 
   const displayTitle =
     activeSession?.title || activeSession?.lastMessagePreview || t("untitledSession");
@@ -48,6 +77,14 @@ export default function DesktopShell({
     if (!activeSession || !onRenameSession) return;
     await onRenameSession(activeSession.id, draftTitle);
     setEditing(false);
+  };
+
+  const toggleTab = (tab: DesktopInspectorTab) => {
+    if (inspectorOpen && inspectorTab === tab) {
+      onCloseInspector();
+    } else {
+      onSelectInspectorTab(tab);
+    }
   };
 
   return (
@@ -116,10 +153,22 @@ export default function DesktopShell({
           <ContextBar usage={usage} variant="inline" />
           <button
             type="button"
-            onClick={onToggleTerminal}
-            aria-pressed={terminalOpen}
+            onClick={() => toggleTab("changes")}
+            aria-pressed={inspectorOpen && inspectorTab === "changes"}
             className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
-              terminalOpen
+              inspectorOpen && inspectorTab === "changes"
+                ? "border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--text-primary)]"
+                : "border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            }`}
+          >
+            {t("changesTab", { count: changesCount })}
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleTab("terminal")}
+            aria-pressed={inspectorOpen && inspectorTab === "terminal"}
+            className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              inspectorOpen && inspectorTab === "terminal"
                 ? "border-[var(--border-strong)] bg-[var(--bg-elevated)] text-[var(--text-primary)]"
                 : "border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             }`}
@@ -136,10 +185,59 @@ export default function DesktopShell({
           {sidebar}
         </div>
         <div className="flex min-w-0 flex-1">{chat}</div>
-        {terminalOpen && (
-          <aside className="w-[420px] shrink-0 border-l border-[var(--border-subtle)]">
-            {terminal}
-          </aside>
+        {inspectorOpen && (
+          <>
+            <div
+              onMouseDown={() => {
+                draggingRef.current = true;
+              }}
+              className="w-1 shrink-0 cursor-col-resize bg-[var(--border-subtle)] transition-colors hover:bg-[var(--accent-primary)]"
+              role="separator"
+              aria-orientation="vertical"
+            />
+            <aside
+              style={{ width: `${inspectorWidth}px` }}
+              className="flex min-w-0 shrink-0 flex-col bg-[var(--bg-surface)]"
+            >
+              <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-2 text-xs">
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => onSelectInspectorTab("changes")}
+                    className={`rounded px-2.5 py-1 text-[11px] font-medium ${
+                      inspectorTab === "changes"
+                        ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
+                        : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    }`}
+                  >
+                    {t("changesTab", { count: changesCount })}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelectInspectorTab("terminal")}
+                    className={`rounded px-2.5 py-1 text-[11px] font-medium ${
+                      inspectorTab === "terminal"
+                        ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]"
+                        : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    }`}
+                  >
+                    {t("terminalTab")}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={onCloseInspector}
+                  aria-label={t("changesCloseInspector")}
+                  className="rounded px-1.5 py-0.5 text-xs text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="min-h-0 flex-1">
+                {inspectorTab === "changes" ? changes : terminal}
+              </div>
+            </aside>
+          </>
         )}
       </div>
     </div>

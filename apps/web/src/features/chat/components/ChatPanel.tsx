@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
+import type { SessionFileChange } from "@contracts/changes";
 import {
   AVAILABLE_MODELS,
   type AuthMode,
@@ -63,6 +64,8 @@ export interface ChatPanelProps {
   onContinueInWeb: () => void;
   onUploadImage: (file: File) => void;
   onOpenTerminal?: () => void;
+  changesFiles?: SessionFileChange[];
+  onInspectFileChange?: (path: string, revId?: string) => void;
   showInlineContextBar?: boolean;
 }
 
@@ -100,6 +103,8 @@ export default function ChatPanel({
   onContinueInWeb,
   onUploadImage,
   onOpenTerminal,
+  changesFiles,
+  onInspectFileChange,
   showInlineContextBar = false,
 }: ChatPanelProps) {
   const { t } = useTranslation();
@@ -295,7 +300,12 @@ export default function ChatPanel({
               {msg.tools && msg.tools.length > 0 && (
                 <div className="mt-2 space-y-1.5">
                   {msg.tools.map((tool) => (
-                    <ToolCallBlock key={tool.id} block={tool} />
+                    <ToolCallBlock
+                      key={tool.id}
+                      block={tool}
+                      changesFiles={changesFiles}
+                      onInspectFileChange={onInspectFileChange}
+                    />
                   ))}
                 </div>
               )}

@@ -8,13 +8,15 @@ import {
   saveSoundMuted,
 } from "../../../lib/sound.ts";
 import { fetchHealth } from "../api.ts";
+import { useChanges } from "../hooks/useChanges.ts";
 import { useChat } from "../hooks/useChat.ts";
 import { useSessions } from "../hooks/useSessions.ts";
+import ChangesPanel from "./ChangesPanel.tsx";
 import ChatPanel from "./ChatPanel.tsx";
 import SessionSidebar from "./SessionSidebar.tsx";
 import TerminalPanel from "./TerminalPanel.tsx";
 import CompactShell, { type CompactViewTab } from "../layouts/CompactShell.tsx";
-import DesktopShell from "../layouts/DesktopShell.tsx";
+import DesktopShell, { type DesktopInspectorTab } from "../layouts/DesktopShell.tsx";
 
 function parseSessionIdFromPath(pathname: string): string | undefined {
   const match = pathname.match(/^\/sessions\/([^/]+)/);
@@ -42,7 +44,8 @@ function useIsDesktop(): boolean {
 export default function WorkspacePage() {
   const isDesktop = useIsDesktop();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [inspectorTab, setInspectorTab] = useState<DesktopInspectorTab>("changes");
   const [compactTab, setCompactTab] = useState<CompactViewTab>("chat");
   const [soundMuted, setSoundMuted] = useState<boolean>(() => loadSoundMuted());
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(() =>
@@ -102,6 +105,8 @@ export default function WorkspacePage() {
     hasBackgroundActivity,
   } = useSessions();
 
+  const changes = useChanges({ activeSessionId, isDesktop });
+
   // Play sound notifications when sessions transition into waiting_permission or finish in background.
   const prevStatusMapRef = useRef<Map<string, SessionStatus>>(new Map());
   useEffect(() => {
@@ -119,10 +124,14 @@ export default function WorkspacePage() {
         playAttention = true;
       } else if (
         prevStatus === "running" &&
-        s.status === "idle" &&
-        (s.id !== activeSessionId || document.hidden)
+        s.status === "idle"
       ) {
-        playCompleted = true;
+        if (s.id === activeSessionId && changes.mode === "git") {
+          void changes.refreshList(s.id, "git");
+        }
+        if (s.id !== activeSessionId || document.hidden) {
+          playCompleted = true;
+        }
       }
     }
 
@@ -132,7 +141,7 @@ export default function WorkspacePage() {
     } else if (playCompleted) {
       playCompletedSound(soundMuted);
     }
-  }, [sessions, activeSessionId, soundMuted]);
+  }, [sessions, activeSessionId, soundMuted, changes]);
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeSessionId),
@@ -160,6 +169,7 @@ export default function WorkspacePage() {
     onSessionUpdated: (updated) => {
       upsertLocal(updated);
     },
+    onFileChanged: changes.applyFileChangedEvent,
     onErrorNotification: handleErrorNotification,
   });
 
@@ -175,11 +185,25 @@ export default function WorkspacePage() {
 
   const handleOpenTerminal = useCallback(() => {
     if (isDesktop) {
-      setTerminalOpen(true);
+      setInspectorTab("terminal");
+      setInspectorOpen(true);
     } else {
       setCompactTab("terminal");
     }
   }, [isDesktop]);
+
+  const handleInspectFileChange = useCallback(
+    (path: string, revId?: string) => {
+      changes.openFileChange(path, revId);
+      if (isDesktop) {
+        setInspectorTab("changes");
+        setInspectorOpen(true);
+      } else {
+        setCompactTab("changes");
+      }
+    },
+    [changes, isDesktop],
+  );
 
   const sidebarNode = (
     <SessionSidebar
@@ -233,7 +257,37 @@ export default function WorkspacePage() {
       onContinueInWeb={() => void chat.continueInWeb()}
       onUploadImage={(file) => void chat.uploadImage(file)}
       onOpenTerminal={handleOpenTerminal}
+      changesFiles={changes.files}
+      onInspectFileChange={handleInspectFileChange}
       showInlineContextBar={!isDesktop}
+    />
+  );
+
+  const changesNode = (
+    <ChangesPanel
+      hasSession={Boolean(activeSessionId)}
+      mode={changes.mode}
+      onModeChange={changes.setMode}
+      files={changes.filteredFiles}
+      summary={changes.summary}
+      selectedPath={changes.selectedPath}
+      onSelectPath={changes.setSelectedPath}
+      selectedRevId={changes.selectedRevId}
+      onSelectRevId={changes.setSelectedRevId}
+      selectedFile={changes.selectedFile}
+      viewMode={changes.viewMode}
+      onViewModeChange={changes.setViewMode}
+      contributorFilter={changes.contributorFilter}
+      onContributorFilterChange={changes.setContributorFilter}
+      contributorOptions={changes.contributorOptions}
+      diff={changes.diff}
+      rawFile={changes.rawFile}
+      loadingList={changes.loadingList}
+      loadingDetail={changes.loadingDetail}
+      reverting={changes.reverting}
+      error={changes.error}
+      onRefresh={() => void changes.refreshList()}
+      onRevert={changes.revert}
     />
   );
 
@@ -250,13 +304,20 @@ export default function WorkspacePage() {
       <DesktopShell
         activeSession={activeSession}
         usage={chat.usage}
-        terminalOpen={terminalOpen}
-        onToggleTerminal={() => setTerminalOpen((v) => !v)}
+        changesCount={changes.summary.filesCount}
+        inspectorOpen={inspectorOpen}
+        inspectorTab={inspectorTab}
+        onSelectInspectorTab={(tab) => {
+          setInspectorTab(tab);
+          setInspectorOpen(true);
+        }}
+        onCloseInspector={() => setInspectorOpen(false)}
         soundMuted={soundMuted}
         onToggleSound={toggleSound}
         onRenameSession={rename}
         sidebar={sidebarNode}
         chat={chatNode}
+        changes={changesNode}
         terminal={terminalNode}
       />
     );
@@ -266,6 +327,7 @@ export default function WorkspacePage() {
     <CompactShell
       activeSession={activeSession}
       usage={chat.usage}
+      changesCount={changes.summary.filesCount}
       hasBackgroundActivity={hasBackgroundActivity(activeSessionId)}
       drawerOpen={drawerOpen}
       onDrawerOpenChange={setDrawerOpen}
@@ -276,6 +338,7 @@ export default function WorkspacePage() {
       onNewSession={() => navigateSession(undefined)}
       sidebar={sidebarNode}
       chat={chatNode}
+      changes={changesNode}
       terminal={terminalNode}
     />
   );

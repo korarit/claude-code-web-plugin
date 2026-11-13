@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { SessionFileChange } from "@contracts/changes";
 import type {
   AuthMode,
   ChatStreamEvent,
@@ -59,6 +60,7 @@ export interface UseChatOptions {
   defaultCwd?: string;
   onSessionCreated?: (session: SessionInfo) => void;
   onSessionUpdated?: (session: SessionInfo) => void;
+  onFileChanged?: (fileChange: SessionFileChange) => void;
   onErrorNotification?: () => void;
 }
 
@@ -68,6 +70,7 @@ export function useChat({
   defaultCwd,
   onSessionCreated,
   onSessionUpdated,
+  onFileChanged,
   onErrorNotification,
 }: UseChatOptions) {
   const [model, setModel] = useState<ModelId>(activeSession?.model ?? "sonnet");
@@ -95,6 +98,10 @@ export function useChat({
   const [error, setError] = useState<string | null>(null);
 
   const seenEventIdsRef = useRef<Set<string>>(new Set());
+  const onFileChangedRef = useRef(onFileChanged);
+  const onErrorNotificationRef = useRef(onErrorNotification);
+  onFileChangedRef.current = onFileChanged;
+  onErrorNotificationRef.current = onErrorNotification;
 
   useEffect(() => {
     if (defaultCwd && !cwd) {
@@ -292,13 +299,19 @@ export function useChat({
           }
           break;
 
+        case "file_changed":
+          if (event.fileChange) {
+            onFileChangedRef.current?.(event.fileChange);
+          }
+          break;
+
         case "error":
           setError(event.message ?? "Unknown error");
-          onErrorNotification?.();
+          onErrorNotificationRef.current?.();
           break;
       }
     },
-    [onErrorNotification],
+    [],
   );
 
   useEffect(() => {

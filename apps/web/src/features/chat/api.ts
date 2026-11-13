@@ -1,4 +1,11 @@
 import type {
+  FileDiffMode,
+  FileDiffResponse,
+  RawFileResponse,
+  RevertFileResponse,
+  SessionChangesResponse,
+} from "@contracts/changes";
+import type {
   ChatInputRequest,
   ChatSendRequest,
   ChatStreamEvent,
@@ -170,6 +177,7 @@ const CHAT_EVENT_TYPES = [
   "permission_prompt",
   "interaction",
   "interaction_resolved",
+  "file_changed",
 ] as const;
 
 export function subscribeSessionEvents(
@@ -258,4 +266,56 @@ export function connectTerminalWs(
       ws.close();
     },
   };
+}
+
+export async function fetchSessionChanges(
+  sessionId: string,
+  mode: FileDiffMode = "session",
+): Promise<SessionChangesResponse> {
+  const params = new URLSearchParams({ mode });
+  const res = await fetch(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/changes?${params.toString()}`,
+  );
+  return parseApiJson<SessionChangesResponse>(res);
+}
+
+export async function fetchFileDiff(
+  sessionId: string,
+  path: string,
+  mode: FileDiffMode = "session",
+  revId?: string,
+): Promise<FileDiffResponse> {
+  const params = new URLSearchParams({ path, mode });
+  if (revId) params.set("revId", revId);
+  const res = await fetch(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/changes/diff?${params.toString()}`,
+  );
+  return parseApiJson<FileDiffResponse>(res);
+}
+
+export async function fetchRawFile(
+  sessionId: string,
+  path: string,
+): Promise<RawFileResponse> {
+  const params = new URLSearchParams({ path });
+  const res = await fetch(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/files/raw?${params.toString()}`,
+  );
+  return parseApiJson<RawFileResponse>(res);
+}
+
+export async function revertFileChange(
+  sessionId: string,
+  path: string,
+  mode: FileDiffMode = "session",
+): Promise<RevertFileResponse> {
+  const res = await fetch(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/changes/revert`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path, mode }),
+    },
+  );
+  return parseApiJson<RevertFileResponse>(res);
 }
