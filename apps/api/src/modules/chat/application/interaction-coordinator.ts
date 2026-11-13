@@ -70,11 +70,6 @@ export class InteractionCoordinator {
       return { resolved: true, interactionId: waiter.interactionId };
     }
 
-    if (pending && pending.kind === "permission") {
-      this.pendingBySession.delete(sessionId);
-      return { resolved: true, interactionId: pending.id };
-    }
-
     return { resolved: false };
   }
 

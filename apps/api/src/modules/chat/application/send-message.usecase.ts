@@ -1,9 +1,10 @@
-import type { AuthMode, ConcurrencyWarning, ModelId } from "@contracts/chat";
+import type { AuthMode, ConcurrencyWarning, HarnessId, ModelId } from "@contracts/chat";
 import { err, ok, type Result } from "@core/result";
 import { newSessionId } from "@core/ids";
 import { isoNow, systemClock, type Clock } from "@core/time";
 import type { AppError } from "@core/errors";
 import {
+  attachExternalSession,
   attachTmuxSession,
   attachTranscript,
   createSession,
@@ -25,14 +26,16 @@ import type {
   AgentTelemetryPort,
   EventBusPort,
   FileChangeTrackerPort,
+  HarnessGatewayPort,
   TerminalRunnerPort,
   TranscriptWatcherPort,
 } from "./ports.ts";
-import { watchTranscriptWithSync } from "./transcript-sync.ts";
+import { observeHarnessSessionWithSync, watchTranscriptWithSync } from "./transcript-sync.ts";
 
 export interface SendMessageInput {
   prompt: string;
   sessionId?: string;
+  harnessId?: HarnessId;
   model?: ModelId;
   cwd?: string;
   authMode?: AuthMode;
@@ -54,9 +57,13 @@ export interface SendMessageRuntime {
   permissionHookTimeoutMs?: number;
 }
 
-function parseSlashModelCommand(prompt: string): ModelId | null {
-  const match = prompt.trim().match(/^\/model\s+(sonnet|opus|haiku)\s*$/i);
-  return match ? (match[1]!.toLowerCase() as ModelId) : null;
+function parseSlashModelCommand(prompt: string, harnessId: HarnessId): ModelId | null {
+  if (harnessId === "claude") {
+    const match = prompt.trim().match(/^\/model\s+(sonnet|opus|haiku)\s*$/i);
+    return match ? match[1]!.toLowerCase() : null;
+  }
+  const match = prompt.trim().match(/^\/model\s+([^\s]+)\s*$/i);
+  return match ? match[1]! : null;
 }
 
 export class SendMessageUsecase {
@@ -70,6 +77,7 @@ export class SendMessageUsecase {
     private readonly coordinator?: InteractionCoordinator,
     private readonly fileChangeTracker?: FileChangeTrackerPort,
     private readonly agentTelemetry?: AgentTelemetryPort,
+    private readonly harnessGateway?: HarnessGatewayPort,
   ) {}
 
   async execute(input: SendMessageInput): Promise<Result<SendMessageOutput, AppError>> {
@@ -91,12 +99,14 @@ export class SendMessageUsecase {
     }
 
     const isNewSession = !existing;
-    const slashModel = parseSlashModelCommand(prompt);
-    const model: ModelId = slashModel ?? input.model ?? existing?.model ?? "sonnet";
+    const harnessId: HarnessId = existing?.harnessId ?? input.harnessId ?? "claude";
+    const slashModel = parseSlashModelCommand(prompt, harnessId);
+    const defaultModel = this.harnessGateway?.getDefaultModel(harnessId) ?? "sonnet";
+    const model: ModelId = slashModel ?? input.model?.trim() ?? existing?.model ?? defaultModel;
     const authMode: AuthMode = input.authMode ?? existing?.authMode ?? "machine_default";
     const agentProfile = input.agentProfile?.trim() || existing?.agentProfile;
 
-    if (authMode === "api_key" && !this.runtime.anthropicApiKey) {
+    if (harnessId === "claude" && authMode === "api_key" && !this.runtime.anthropicApiKey) {
       return err(new ApiKeyNotConfiguredError());
     }
 
@@ -114,7 +124,7 @@ export class SendMessageUsecase {
       ).length;
 
     const concurrencyWarning: ConcurrencyWarning | undefined =
-      authMode === "machine_default" && activeMachineDefault + 1 > softLimit
+      harnessId === "claude" && authMode === "machine_default" && activeMachineDefault + 1 > softLimit
         ? { activeCount: activeMachineDefault + 1, limit: softLimit }
         : undefined;
 
@@ -124,7 +134,7 @@ export class SendMessageUsecase {
         {
           id: sessionId,
           model,
-          harnessId: "claude",
+          harnessId,
           origin: "web",
           controlMode: "interactive",
           authMode,
@@ -134,24 +144,52 @@ export class SendMessageUsecase {
         this.clock,
       );
 
-    const ensured = await this.runner.ensureSession({
-      sessionId: session.id,
-      model,
-      cwd,
-      port: this.runtime.port,
-      token: this.runtime.token,
-      resumeSessionId: isNewSession ? undefined : (session.externalSessionId ?? session.id),
-      authMode,
-      apiKey: authMode === "api_key" ? this.runtime.anthropicApiKey : undefined,
-      agentProfile,
-      tmuxSessionName: session.tmuxSession,
-    });
+    if (this.harnessGateway) {
+      const started = await this.harnessGateway.startOrResumeSession(harnessId, {
+        sessionId: session.id,
+        model,
+        cwd,
+        port: this.runtime.port,
+        token: this.runtime.token,
+        resumeSessionId: isNewSession
+          ? undefined
+          : (session.externalSessionId ?? (harnessId === "claude" ? session.id : undefined)),
+        authMode,
+        apiKey: authMode === "api_key" ? this.runtime.anthropicApiKey : undefined,
+        agentProfile,
+        tmuxSessionName: session.tmuxSession,
+      });
 
-    const transcriptPath =
-      session.transcriptPath ?? this.watcher.resolveTranscriptPath(cwd, session.id);
+      if (started.externalSessionId) {
+        session = attachExternalSession(session, started.externalSessionId, this.clock);
+      }
+      if (started.tmuxSession) {
+        session = attachTmuxSession(session, started.tmuxSession, this.clock);
+      }
+      if (started.transcriptPath) {
+        session = attachTranscript(session, started.transcriptPath, this.clock);
+      }
+    } else {
+      const ensured = await this.runner.ensureSession({
+        sessionId: session.id,
+        model,
+        cwd,
+        port: this.runtime.port,
+        token: this.runtime.token,
+        resumeSessionId: isNewSession ? undefined : (session.externalSessionId ?? session.id),
+        authMode,
+        apiKey: authMode === "api_key" ? this.runtime.anthropicApiKey : undefined,
+        agentProfile,
+        tmuxSessionName: session.tmuxSession,
+      });
 
-    session = attachTmuxSession(session, ensured.tmuxSession, this.clock);
-    session = attachTranscript(session, transcriptPath, this.clock);
+      const transcriptPath =
+        session.transcriptPath ?? this.watcher.resolveTranscriptPath(cwd, session.id);
+
+      session = attachTmuxSession(session, ensured.tmuxSession, this.clock);
+      session = attachTranscript(session, transcriptPath, this.clock);
+    }
+
     if (slashModel) {
       session = updateSessionModel(session, slashModel, this.clock);
     }
@@ -161,15 +199,28 @@ export class SendMessageUsecase {
     this.sessions.save(session);
     this.eventBus.publishListEvent({ type: "upsert", session });
 
-    await watchTranscriptWithSync(session.id, transcriptPath, {
-      sessions: this.sessions,
-      watcher: this.watcher,
-      eventBus: this.eventBus,
-      coordinator: this.coordinator,
-      fileChangeTracker: this.fileChangeTracker,
-      agentTelemetry: this.agentTelemetry,
-      clock: this.clock,
-    });
+    if (this.harnessGateway) {
+      await observeHarnessSessionWithSync(session, {
+        sessions: this.sessions,
+        harnessGateway: this.harnessGateway,
+        watcher: this.watcher,
+        eventBus: this.eventBus,
+        coordinator: this.coordinator,
+        fileChangeTracker: this.fileChangeTracker,
+        agentTelemetry: this.agentTelemetry,
+        clock: this.clock,
+      });
+    } else if (session.transcriptPath) {
+      await watchTranscriptWithSync(session.id, session.transcriptPath, {
+        sessions: this.sessions,
+        watcher: this.watcher,
+        eventBus: this.eventBus,
+        coordinator: this.coordinator,
+        fileChangeTracker: this.fileChangeTracker,
+        agentTelemetry: this.agentTelemetry,
+        clock: this.clock,
+      });
+    }
 
     const now = isoNow(this.clock);
     this.eventBus.publish(session.id, {
@@ -185,7 +236,11 @@ export class SendMessageUsecase {
     });
 
     try {
-      await this.runner.sendPrompt(ensured.tmuxSession, prompt);
+      if (this.harnessGateway) {
+        await this.harnessGateway.sendPrompt(session, prompt, { model, agentProfile });
+      } else {
+        await this.runner.sendPrompt(session.tmuxSession!, prompt);
+      }
     } catch (e) {
       const recovered = markIdle(session, this.clock);
       this.sessions.save(recovered);

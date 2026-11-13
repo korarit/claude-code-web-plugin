@@ -49,6 +49,7 @@ export function errorPlugin(security?: SecurityOptions) {
 
         const headerToken =
           request.headers.get("x-harness-token") ??
+          request.headers.get("x-claude-web-token") ??
           request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
 
         if (headerToken !== undefined && headerToken !== security.token) {

@@ -43,9 +43,41 @@ export interface TeamTaskRecord {
   updatedAt?: string;
 }
 
-const READ_TOOLS = new Set(["Read", "Glob", "Grep", "LS", "WebFetch", "WebSearch"]);
-const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-const CMD_TOOLS = new Set(["Bash"]);
+const READ_TOOLS = new Set([
+  "Read",
+  "Glob",
+  "Grep",
+  "LS",
+  "WebFetch",
+  "WebSearch",
+  "read",
+  "glob",
+  "grep",
+  "list",
+  "webfetch",
+  "read_file",
+  "view_file",
+  "find_by_name",
+  "grep_search",
+  "list_dir",
+]);
+const EDIT_TOOLS = new Set([
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit",
+  "write_to_file",
+  "replace_file_content",
+  "multi_replace_file_content",
+  "write_file",
+  "edit_file",
+  "edit",
+  "write",
+  "patch",
+  "multiedit",
+]);
+const CMD_TOOLS = new Set(["Bash", "bash", "run_command"]);
+const QUESTION_TOOLS = new Set(["AskUserQuestion", "ask_question", "question"]);
 const MAX_LOGS = 20;
 
 export function extractToolTarget(toolInput: unknown): string | undefined {
@@ -53,14 +85,20 @@ export function extractToolTarget(toolInput: unknown): string | undefined {
   const obj = toolInput as Record<string, unknown>;
   const candidate =
     obj["file_path"] ??
+    obj["filePath"] ??
+    obj["TargetFile"] ??
+    obj["Path"] ??
     obj["path"] ??
     obj["notebook_path"] ??
     obj["command"] ??
+    obj["CommandLine"] ??
     obj["pattern"] ??
     obj["url"] ??
     obj["description"] ??
     obj["subagent_type"] ??
-    obj["prompt"];
+    obj["Role"] ??
+    obj["prompt"] ??
+    obj["Prompt"];
   if (typeof candidate !== "string") return undefined;
   const trimmed = candidate.trim();
   return trimmed ? truncate(trimmed, 80) : undefined;
@@ -71,7 +109,7 @@ export function deriveActivityFromTool(
   toolInput?: unknown,
 ): { state: AgentActivityState; target?: string } {
   const target = extractToolTarget(toolInput);
-  if (toolName === "AskUserQuestion") {
+  if (QUESTION_TOOLS.has(toolName)) {
     return { state: "waiting", target };
   }
   if (READ_TOOLS.has(toolName)) {
@@ -97,9 +135,18 @@ export function extractSubagentMeta(
   const rawType =
     typeof obj["subagent_type"] === "string" && obj["subagent_type"].trim()
       ? obj["subagent_type"].trim()
-      : typeof obj["name"] === "string" && obj["name"].trim()
-        ? obj["name"].trim()
-        : undefined;
+      : typeof obj["TypeName"] === "string" && obj["TypeName"].trim()
+        ? obj["TypeName"].trim()
+        : typeof obj["name"] === "string" && obj["name"].trim()
+          ? obj["name"].trim()
+          : undefined;
+  const rawRole =
+    typeof obj["Role"] === "string" && obj["Role"].trim()
+      ? truncate(obj["Role"].trim(), 48)
+      : undefined;
+  if (rawRole) {
+    return { role: rawRole, agentType: rawType };
+  }
   const rawDesc =
     typeof obj["description"] === "string" && obj["description"].trim()
       ? truncate(obj["description"].trim(), 48)

@@ -22,7 +22,21 @@ import type {
   SessionAgentLookupPort,
 } from "./ports.ts";
 
-const EDIT_CHANGE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+const EDIT_CHANGE_TOOLS = new Set([
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit",
+  "write_to_file",
+  "replace_file_content",
+  "multi_replace_file_content",
+  "write_file",
+  "edit_file",
+  "edit",
+  "write",
+  "patch",
+  "multiedit",
+]);
 
 function mapSessionStatusToAgentState(status: string): AgentActivityState {
   switch (status) {
@@ -325,6 +339,46 @@ export class SyncAgentTelemetryUsecase {
     if (!session) return;
     const now = event.timestamp ?? isoNow(this.clock);
 
+    // Handle pre-normalized agent node updates emitted by multi-harness adapters (e.g. AGY / OpenCode).
+    if (event.type === "agent_updated" && event.agentRecord) {
+      const prev = this.findAgent(sessionId, event.agentRecord.agentId);
+      const merged: AgentNodeRecord = {
+        ...prev,
+        ...event.agentRecord,
+        recentLogs:
+          event.agentRecord.recentLogs.length > 0
+            ? event.agentRecord.recentLogs
+            : (prev?.recentLogs ?? []),
+        startedAt: prev?.startedAt ?? event.agentRecord.startedAt ?? now,
+        updatedAt: event.agentRecord.updatedAt ?? now,
+      };
+      this.saveAgent(sessionId, merged);
+      this.publisher.publishAgentUpdated(sessionId, merged);
+      if (merged.agentId !== "main" && merged.transcriptPath && merged.state !== "done") {
+        await this.ensureAgentTranscriptWatch(sessionId, merged.agentId, merged.transcriptPath);
+      }
+      return;
+    }
+
+    // Handle events directly tagged with a non-main agentId (e.g. OpenCode child sessions).
+    if (event.agentId && event.agentId !== "main") {
+      const child =
+        this.findAgent(sessionId, event.agentId) ??
+        ({
+          agentId: event.agentId,
+          parentAgentId: "main",
+          role: `Subagent (${event.agentId.slice(0, 8)})`,
+          canSendInput: false,
+          state: "thinking",
+          recentLogs: [],
+          startedAt: now,
+          updatedAt: now,
+        } satisfies AgentNodeRecord);
+      this.applyEventToAgent(sessionId, child, event, now);
+      this.publisher.publishAgentStreamEvent(sessionId, child.agentId, event);
+      return;
+    }
+
     // Handle TodoWrite in transcript.
     if (event.tool === "TodoWrite" && event.toolInput) {
       const mapped = mapTodoWriteToTasks(event.toolInput, now);
@@ -333,8 +387,11 @@ export class SyncAgentTelemetryUsecase {
       }
     }
 
-    // Handle Task / Agent subagent spawn from main transcript.
-    if ((event.tool === "Task" || event.tool === "Agent") && event.toolUseId) {
+    // Handle Task / Agent / invoke_subagent spawn from main transcript.
+    if (
+      (event.tool === "Task" || event.tool === "Agent" || event.tool === "invoke_subagent") &&
+      event.toolUseId
+    ) {
       const existing = this.findAgent(sessionId, event.toolUseId);
       const meta = extractSubagentMeta(event.tool, event.toolInput);
       const next: AgentNodeRecord = {

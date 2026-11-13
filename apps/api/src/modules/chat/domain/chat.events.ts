@@ -1,5 +1,6 @@
 import type {
   AgentNode,
+  HarnessId,
   PendingInteraction,
   PermissionPromptPayload,
   SessionFileChange,
@@ -53,10 +54,13 @@ export interface DomainChatEvent {
   model?: string;
   message?: string;
   timestamp?: string;
+  discoveredExternalSessionId?: string;
+  discoveredTranscriptPath?: string;
 }
 
 export interface DomainHookEvent {
   sessionId?: string;
+  harnessId?: HarnessId;
   externalSessionId?: string;
   tmuxSession?: string;
   transcriptPath?: string;

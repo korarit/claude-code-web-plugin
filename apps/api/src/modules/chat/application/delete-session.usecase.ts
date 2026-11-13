@@ -7,6 +7,7 @@ import type {
   AgentTelemetryPort,
   EventBusPort,
   FileChangeTrackerPort,
+  HarnessGatewayPort,
   TerminalRunnerPort,
   TranscriptWatcherPort,
 } from "./ports.ts";
@@ -20,6 +21,7 @@ export class DeleteSessionUsecase {
     private readonly coordinator?: InteractionCoordinator,
     private readonly fileChangeTracker?: FileChangeTrackerPort,
     private readonly agentTelemetry?: AgentTelemetryPort,
+    private readonly harnessGateway?: HarnessGatewayPort,
   ) {}
 
   async execute(sessionId: string): Promise<Result<{ deleted: true; id: string }, AppError>> {
@@ -27,7 +29,9 @@ export class DeleteSessionUsecase {
     if (!existing) return err(new SessionNotFoundError(sessionId));
 
     this.coordinator?.cancelSession(existing.id);
-    if (existing.tmuxSession) {
+    if (this.harnessGateway) {
+      await this.harnessGateway.stopSession(existing).catch(() => {});
+    } else if (existing.tmuxSession) {
       await this.runner.stopSession(existing.tmuxSession).catch(() => {});
     }
     this.watcher.unwatch(existing.id);

@@ -33,6 +33,7 @@ import {
   type AgentTelemetryPort,
   type EventBusPort,
   type FileChangeTrackerPort,
+  type HarnessGatewayPort,
   type SendMessageRuntime,
   type TerminalAttachment,
   type TerminalAttachPort,
@@ -58,8 +59,31 @@ function toListContract(event: SessionListEvent): SessionsListEvent {
   };
 }
 
-function buildHookOutput(decision: PermissionDecision | "timeout" | undefined) {
+function buildHookOutput(
+  decision: PermissionDecision | "timeout" | undefined,
+  hookEventName?: string,
+) {
   if (!decision || decision === "timeout") return undefined;
+  if (hookEventName === "PreToolUse") {
+    if (decision === "deny") {
+      return {
+        decision: "deny",
+        reason: "Denied from Harness Web UI",
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: "Denied from Harness Web UI",
+        },
+      };
+    }
+    return {
+      decision: "auto_approve",
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+      },
+    };
+  }
   if (decision === "deny") {
     return {
       hookSpecificOutput: {
@@ -92,6 +116,7 @@ export interface ChatRoutesDeps {
   workspace: WorkspacePort;
   fileChangeTracker?: FileChangeTrackerPort;
   agentTelemetry?: AgentTelemetryPort;
+  harnessGateway?: HarnessGatewayPort;
 }
 
 export function chatRoutes(deps: ChatRoutesDeps) {
@@ -105,6 +130,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     workspace,
     fileChangeTracker,
     agentTelemetry,
+    harnessGateway,
   } = deps;
   const coordinator = deps.coordinator ?? new InteractionCoordinator();
 
@@ -118,6 +144,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     coordinator,
     fileChangeTracker,
     agentTelemetry,
+    harnessGateway,
   );
   const handleHook = new HandleHookUsecase(
     sessions,
@@ -129,8 +156,16 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     runtime.permissionHookTimeoutMs ?? 55_000,
     fileChangeTracker,
     agentTelemetry,
+    harnessGateway,
   );
-  const sendInput = new SendInputUsecase(sessions, runner, eventBus, coordinator, systemClock);
+  const sendInput = new SendInputUsecase(
+    sessions,
+    runner,
+    eventBus,
+    coordinator,
+    systemClock,
+    harnessGateway,
+  );
   const resumeSession = new ResumeSessionUsecase(
     sessions,
     runner,
@@ -141,14 +176,23 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     coordinator,
     fileChangeTracker,
     agentTelemetry,
+    harnessGateway,
   );
-  const updateSession = new UpdateSessionUsecase(sessions, runner, watcher, eventBus);
+  const updateSession = new UpdateSessionUsecase(
+    sessions,
+    runner,
+    watcher,
+    eventBus,
+    systemClock,
+    harnessGateway,
+  );
   const abortSession = new AbortSessionUsecase(
     sessions,
     runner,
     eventBus,
     systemClock,
     coordinator,
+    harnessGateway,
   );
   const deleteSession = new DeleteSessionUsecase(
     sessions,
@@ -158,6 +202,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     coordinator,
     fileChangeTracker,
     agentTelemetry,
+    harnessGateway,
   );
   const listWorkspaceFiles = new ListWorkspaceFilesUsecase(workspace, runtime.defaultCwd);
   const uploadImage = new UploadImageUsecase(workspace, runtime.defaultCwd);
@@ -308,9 +353,11 @@ export function chatRoutes(deps: ChatRoutesDeps) {
       const session = sessions.get(params.id);
       if (!session) throw new SessionNotFoundError(params.id);
 
-      const diskEvents = session.transcriptPath
-        ? await watcher.readRecentEvents(session.transcriptPath).catch(() => [])
-        : [];
+      const diskEvents = harnessGateway
+        ? await harnessGateway.readRecentEvents(session).catch(() => [])
+        : session.transcriptPath
+          ? await watcher.readRecentEvents(session.transcriptPath).catch(() => [])
+          : [];
       const recentEvents =
         diskEvents.length > 0 ? diskEvents : eventBus.getRecentEvents(session.id);
 
@@ -446,6 +493,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
         const result = await sendMessage.execute({
           prompt: body.prompt,
           sessionId: body.sessionId,
+          harnessId: body.harnessId as HarnessId | undefined,
           model: body.model,
           cwd: body.cwd,
           authMode: body.authMode as AuthMode | undefined,
@@ -464,7 +512,10 @@ export function chatRoutes(deps: ChatRoutesDeps) {
         body: t.Object({
           prompt: t.String(),
           sessionId: t.Optional(t.String()),
-          model: t.Optional(t.Union([t.Literal("sonnet"), t.Literal("opus"), t.Literal("haiku")])),
+          harnessId: t.Optional(
+            t.Union([t.Literal("claude"), t.Literal("agy"), t.Literal("opencode")]),
+          ),
+          model: t.Optional(t.String()),
           cwd: t.Optional(t.String()),
           authMode: t.Optional(t.Union([t.Literal("machine_default"), t.Literal("api_key")])),
           agentProfile: t.Optional(t.String()),
@@ -489,9 +540,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
       {
         body: t.Optional(
           t.Object({
-            model: t.Optional(
-              t.Union([t.Literal("sonnet"), t.Literal("opus"), t.Literal("haiku")]),
-            ),
+            model: t.Optional(t.String()),
             authMode: t.Optional(t.Union([t.Literal("machine_default"), t.Literal("api_key")])),
             agentProfile: t.Optional(t.String()),
           }),
@@ -558,7 +607,11 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     })
     .post("/api/chat/hooks", async ({ body, request }) => {
       const payload = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
-      const headerSessionId = request.headers.get("x-claude-web-session-id") ?? undefined;
+      const headerSessionId =
+        request.headers.get("x-claude-web-session-id") ??
+        request.headers.get("x-agy-web-session-id") ??
+        undefined;
+      const headerHarnessId = request.headers.get("x-harness-id");
       const headerTmuxSession = request.headers.get("x-tmux-session") ?? undefined;
       const waitHeader = request.headers.get("x-harness-wait-decision");
       const waitForDecision = waitHeader === "1" || waitHeader === "true";
@@ -575,9 +628,17 @@ export function chatRoutes(deps: ChatRoutesDeps) {
         return typeof v === "string" && v.trim() ? v.trim() : undefined;
       };
 
+      const rawHarness = headerHarnessId ?? strField("harness_id", "harnessId");
+      const harnessId: HarnessId | undefined =
+        rawHarness === "claude" || rawHarness === "agy" || rawHarness === "opencode"
+          ? rawHarness
+          : undefined;
+
       const result = await handleHook.execute({
         sessionId: headerSessionId,
-        externalSessionId: strField("session_id", "sessionId"),
+        harnessId,
+        externalSessionId:
+          strField("session_id", "sessionId") ?? strField("conversation_id", "conversationId"),
         tmuxSession: strField("tmux_session", "tmuxSession") ?? headerTmuxSession,
         transcriptPath: strField("transcript_path", "transcriptPath"),
         cwd: strField("cwd"),
@@ -597,7 +658,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
       });
       if (!result.ok) throw result.error;
 
-      const hookOutput = buildHookOutput(result.value.decision);
+      const hookOutput = buildHookOutput(result.value.decision, hookEventName);
       return okResponse({
         matched: result.value.matched,
         decision: result.value.decision,

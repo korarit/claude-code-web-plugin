@@ -20,10 +20,11 @@ import type {
   AgentTelemetryPort,
   EventBusPort,
   FileChangeTrackerPort,
+  HarnessGatewayPort,
   TerminalRunnerPort,
   TranscriptWatcherPort,
 } from "./ports.ts";
-import { watchTranscriptWithSync } from "./transcript-sync.ts";
+import { observeHarnessSessionWithSync, watchTranscriptWithSync } from "./transcript-sync.ts";
 
 export interface HandleHookOutput {
   matched: boolean;
@@ -35,8 +36,21 @@ function extractCommandOrTarget(toolInput: unknown): string | undefined {
   if (!toolInput || typeof toolInput !== "object") return undefined;
   const obj = toolInput as Record<string, unknown>;
   const candidate =
-    obj["command"] ?? obj["file_path"] ?? obj["path"] ?? obj["url"] ?? obj["pattern"];
-  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : undefined;
+    obj["CommandLine"] ??
+    obj["command"] ??
+    obj["TargetFile"] ??
+    obj["file_path"] ??
+    obj["filePath"] ??
+    obj["Path"] ??
+    obj["path"] ??
+    obj["Url"] ??
+    obj["url"] ??
+    obj["Query"] ??
+    obj["Pattern"] ??
+    obj["pattern"];
+  if (typeof candidate !== "string") return undefined;
+  const cleaned = candidate.trim().replace(/^"|"$/g, "");
+  return cleaned || undefined;
 }
 
 export class HandleHookUsecase {
@@ -50,6 +64,7 @@ export class HandleHookUsecase {
     private readonly permissionTimeoutMs = 55_000,
     private readonly fileChangeTracker?: FileChangeTrackerPort,
     private readonly agentTelemetry?: AgentTelemetryPort,
+    private readonly harnessGateway?: HarnessGatewayPort,
   ) {}
 
   async execute(hook: DomainHookEvent): Promise<Result<HandleHookOutput, AppError>> {
@@ -68,7 +83,18 @@ export class HandleHookUsecase {
       next = attachTranscript(next, hook.transcriptPath, this.clock);
     }
 
-    if (next.transcriptPath) {
+    if (this.harnessGateway) {
+      await observeHarnessSessionWithSync(next, {
+        sessions: this.sessions,
+        harnessGateway: this.harnessGateway,
+        watcher: this.watcher,
+        eventBus: this.eventBus,
+        coordinator: this.coordinator,
+        fileChangeTracker: this.fileChangeTracker,
+        agentTelemetry: this.agentTelemetry,
+        clock: this.clock,
+      });
+    } else if (next.transcriptPath) {
       await watchTranscriptWithSync(next.id, next.transcriptPath, {
         sessions: this.sessions,
         watcher: this.watcher,
@@ -111,6 +137,90 @@ export class HandleHookUsecase {
               agentId: hook.agentId,
             })
             .catch(() => {});
+        }
+        if (this.coordinator && hook.waitForDecision) {
+          const commandOrTarget = extractCommandOrTarget(hook.toolInput);
+          const message =
+            hook.message ??
+            (hook.toolName
+              ? `Waiting for approval to run ${hook.toolName}`
+              : `Waiting for permission in ${next.harnessId}`);
+          const interaction: PendingInteraction = {
+            id: newInteractionId(),
+            sessionId: next.id,
+            kind: "permission",
+            toolName: hook.toolName ?? "Tool",
+            commandOrTarget,
+            message,
+            options: [
+              { id: "allow_once", label: "Allow Once" },
+              { id: "always_allow", label: "Always Allow" },
+              { id: "deny", label: "Deny" },
+            ],
+            createdAt: timestamp,
+          };
+          next = setPendingInteraction(next, interaction, this.clock);
+          this.sessions.save(next);
+          this.eventBus.publishListEvent({ type: "upsert", session: next });
+          this.eventBus.publish(next.id, {
+            type: "interaction",
+            interaction,
+            status: "waiting_permission",
+            timestamp,
+          });
+          this.eventBus.publish(next.id, {
+            type: "permission_prompt",
+            status: "waiting_permission",
+            permissionPrompt: {
+              tool: hook.toolName,
+              command: commandOrTarget,
+              message,
+            },
+            timestamp,
+          });
+          this.eventBus.publish(next.id, {
+            type: "status",
+            status: "waiting_permission",
+            timestamp,
+          });
+          if (this.agentTelemetry) {
+            await this.agentTelemetry
+              .onHookEvent(next.id, { ...hook, hookEventName: "PermissionRequest" }, next.externalSessionId)
+              .catch(() => {});
+          }
+          const decision = await this.coordinator.waitForPermissionDecision(
+            next.id,
+            interaction,
+            this.permissionTimeoutMs,
+          );
+          const latest = this.sessions.get(next.id) ?? next;
+          if (decision !== "timeout") {
+            let resumed = clearPendingInteraction(latest, this.clock);
+            resumed = markRunning(resumed, this.clock);
+            this.sessions.save(resumed);
+            this.eventBus.publishListEvent({ type: "upsert", session: resumed });
+            this.eventBus.publish(resumed.id, {
+              type: "interaction_resolved",
+              interactionId: interaction.id,
+              timestamp: isoNow(this.clock),
+            });
+            this.eventBus.publish(resumed.id, {
+              type: "status",
+              status: "running",
+              timestamp: isoNow(this.clock),
+            });
+            if (this.agentTelemetry) {
+              await this.agentTelemetry
+                .onHookEvent(
+                  resumed.id,
+                  { ...hook, hookEventName: "PermissionResolved" },
+                  resumed.externalSessionId,
+                )
+                .catch(() => {});
+            }
+            return ok({ matched: true, session: resumed, decision });
+          }
+          return ok({ matched: true, session: latest, decision: "timeout" });
         }
         if (next.status !== "running") {
           next = markRunning(next, this.clock);
@@ -346,12 +456,15 @@ export class HandleHookUsecase {
   private autoDiscoverSession(hook: DomainHookEvent): Session | null {
     if (!hook.externalSessionId && !hook.transcriptPath) return null;
 
+    const inferredHarness =
+      hook.harnessId ??
+      (hook.transcriptPath?.includes("antigravity") ? "agy" : "claude");
     const isTmux = Boolean(hook.tmuxSession && !hook.tmuxSession.startsWith("cw-"));
     const session = createSession(
       {
         id: newSessionId(),
-        model: "sonnet",
-        harnessId: "claude",
+        model: inferredHarness === "agy" ? "gemini-2.5-pro" : "sonnet",
+        harnessId: inferredHarness,
         origin: isTmux ? "tmux" : "cli",
         controlMode: isTmux ? "interactive" : "mirror",
         status: hook.hookEventName === "Stop" ? "idle" : "running",

@@ -1,9 +1,13 @@
 import type {
   AuthMode,
+  ChatInputRequest,
+  DiscoveredExternalSession,
+  HarnessId,
   ModelId,
+  PendingInteraction,
   UploadImageResponse,
   WorkspaceFileEntry,
-} from "@contracts/chat";
+} from "@contracts/index";
 import type { DomainChatEvent, DomainHookEvent, SessionListEvent } from "../domain/chat.events.ts";
 
 export interface EnsureSessionOptions {
@@ -106,4 +110,50 @@ export interface AgentTelemetryPort {
   onHookEvent(sessionId: string, hook: DomainHookEvent, externalSessionId?: string): Promise<void>;
   onTranscriptEvent(sessionId: string, event: DomainChatEvent): Promise<void>;
   deleteSession?(sessionId: string): void;
+}
+
+export interface HarnessSessionRef {
+  id: string;
+  harnessId: HarnessId;
+  externalSessionId?: string;
+  tmuxSession?: string;
+  transcriptPath?: string;
+  cwd?: string;
+  model?: string;
+}
+
+export interface HarnessStartedResult {
+  externalSessionId?: string;
+  tmuxSession?: string;
+  transcriptPath?: string;
+  isNew: boolean;
+}
+
+export interface HarnessGatewayPort {
+  getDefaultModel(harnessId: HarnessId): string;
+  isAvailable(harnessId: HarnessId): Promise<boolean>;
+  startOrResumeSession(
+    harnessId: HarnessId,
+    options: EnsureSessionOptions,
+  ): Promise<HarnessStartedResult>;
+  sendPrompt(
+    session: HarnessSessionRef,
+    prompt: string,
+    options?: { model?: string; agentProfile?: string },
+  ): Promise<void>;
+  sendInput(
+    session: HarnessSessionRef,
+    input: ChatInputRequest,
+    pendingInteraction?: PendingInteraction | null,
+  ): Promise<{ handled: boolean; method: "hook" | "tmux" | "server_api"; resolved: boolean }>;
+  abortSession(session: HarnessSessionRef): Promise<void>;
+  stopSession(session: HarnessSessionRef): Promise<void>;
+  observeEvents(
+    session: HarnessSessionRef,
+    onEvent: (event: DomainChatEvent) => void,
+    options?: { fromBeginning?: boolean },
+  ): Promise<() => void>;
+  readRecentEvents(session: HarnessSessionRef, limit?: number): Promise<DomainChatEvent[]>;
+  discoverSessions?(): Promise<DiscoveredExternalSession[]>;
+  watchExternalSessions?(onUpsert: (session: DiscoveredExternalSession) => void): () => void;
 }

@@ -137,7 +137,7 @@ export function clearPendingInteraction(session: Session, clock: Clock): Session
 export function adoptToInteractive(
   session: Session,
   params: {
-    tmuxSession: string;
+    tmuxSession?: string;
     model?: ModelId;
     authMode?: AuthMode;
     agentProfile?: string;
@@ -175,6 +175,19 @@ export function attachTranscript(
   return {
     ...session,
     transcriptPath,
+    updatedAt: isoNow(clock),
+  };
+}
+
+export function attachExternalSession(
+  session: Session,
+  externalSessionId: string,
+  clock: Clock,
+): Session {
+  if (session.externalSessionId === externalSessionId) return session;
+  return {
+    ...session,
+    externalSessionId,
     updatedAt: isoNow(clock),
   };
 }

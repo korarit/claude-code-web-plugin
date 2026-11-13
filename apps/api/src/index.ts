@@ -10,10 +10,12 @@ import type { SessionRepository } from "./modules/chat/domain/repository.port.ts
 import {
   DiscoverSessionUsecase,
   InteractionCoordinator,
+  observeHarnessSessionWithSync,
   watchTranscriptWithSync,
   type AgentTelemetryPort,
   type EventBusPort,
   type FileChangeTrackerPort,
+  type HarnessGatewayPort,
   type TerminalAttachPort,
   type TerminalRunnerPort,
   type TranscriptWatcherPort,
@@ -49,6 +51,11 @@ import { ClaudeTeamTasksWatcher } from "./modules/agents/infrastructure/team-tas
 import { agentsRoutes } from "./modules/agents/presentation/agents.routes.ts";
 import { LocalGitWorktreeAdapter } from "./modules/workspace/infrastructure/git-worktree.adapter.ts";
 import { workspaceRoutes } from "./modules/workspace/presentation/workspace.routes.ts";
+import { HarnessRegistry } from "./modules/harness/application/index.ts";
+import { AntigravityHarnessAdapter } from "./modules/harness/infrastructure/agy-harness.adapter.ts";
+import { ClaudeHarnessAdapter } from "./modules/harness/infrastructure/claude-harness.adapter.ts";
+import { OpenCodeHarnessAdapter } from "./modules/harness/infrastructure/opencode-harness.adapter.ts";
+import { harnessRoutes } from "./modules/harness/presentation/harness.routes.ts";
 
 const WEB_DIST = join(import.meta.dir, "../../web/dist");
 
@@ -94,6 +101,7 @@ export interface CreateAppOptions {
   coordinator?: InteractionCoordinator;
   terminalAttach?: TerminalAttachPort;
   workspace?: WorkspacePort;
+  harnessRegistry?: HarnessRegistry;
   defaultCwd?: string;
 }
 
@@ -143,6 +151,111 @@ export function createApp(options: CreateAppOptions = {}) {
     },
   };
 
+  const agyAdapter =
+    (options.harnessRegistry?.find("agy") as AntigravityHarnessAdapter | undefined) ??
+    new AntigravityHarnessAdapter({
+      agyCliHome: env.agyCliHome,
+      agyIdeHome: env.agyIdeHome,
+      enableIdeDiscovery: env.enableAgyIdeDiscovery,
+    });
+  const harnessRegistry =
+    options.harnessRegistry ??
+    new HarnessRegistry([
+      new ClaudeHarnessAdapter({
+        claudeHome: env.claudeHome,
+        runner,
+        watcher,
+        defaultCwd,
+      }),
+      agyAdapter,
+      new OpenCodeHarnessAdapter({
+        opencodeDataHome: env.opencodeDataHome,
+        externalServerUrl: env.opencodeServerUrl,
+      }),
+    ]);
+
+  const harnessGateway: HarnessGatewayPort = {
+    getDefaultModel: (harnessId) => harnessRegistry.get(harnessId).getDefaultModel(),
+    isAvailable: (harnessId) => harnessRegistry.get(harnessId).detectAvailability(),
+    startOrResumeSession: (harnessId, opts) =>
+      harnessRegistry.get(harnessId).startOrResumeSession(opts),
+    sendPrompt: (session, prompt, opts) =>
+      harnessRegistry.get(session.harnessId).sendPrompt(
+        {
+          sessionId: session.id,
+          externalSessionId: session.externalSessionId,
+          tmuxSession: session.tmuxSession,
+          transcriptPath: session.transcriptPath,
+          cwd: session.cwd,
+          model: session.model,
+        },
+        prompt,
+        opts,
+      ),
+    sendInput: async (session, input, pendingInteraction) => {
+      const adapter = harnessRegistry.get(session.harnessId);
+      if (!adapter.sendInput) {
+        return { handled: false, method: "tmux", resolved: false };
+      }
+      return adapter.sendInput({
+        sessionId: session.id,
+        externalSessionId: session.externalSessionId,
+        tmuxSession: session.tmuxSession,
+        cwd: session.cwd,
+        inputType: input.inputType,
+        value: input.value,
+        interactionId: input.interactionId,
+        pendingInteraction,
+      });
+    },
+    abortSession: (session) =>
+      harnessRegistry.get(session.harnessId).abortSession({
+        sessionId: session.id,
+        externalSessionId: session.externalSessionId,
+        tmuxSession: session.tmuxSession,
+        cwd: session.cwd,
+      }),
+    stopSession: async (session) => {
+      const adapter = harnessRegistry.get(session.harnessId);
+      await adapter.stopSession?.({
+        sessionId: session.id,
+        externalSessionId: session.externalSessionId,
+        tmuxSession: session.tmuxSession,
+        cwd: session.cwd,
+      });
+    },
+    observeEvents: (session, onEvent, opts) =>
+      harnessRegistry.get(session.harnessId).observeEvents(
+        {
+          sessionId: session.id,
+          externalSessionId: session.externalSessionId,
+          tmuxSession: session.tmuxSession,
+          transcriptPath: session.transcriptPath,
+          cwd: session.cwd,
+          model: session.model,
+        },
+        onEvent,
+        opts,
+      ),
+    readRecentEvents: async (session, limit) => {
+      const adapter = harnessRegistry.get(session.harnessId);
+      if (!adapter.readRecentEvents) return [];
+      return adapter.readRecentEvents(
+        {
+          sessionId: session.id,
+          externalSessionId: session.externalSessionId,
+          tmuxSession: session.tmuxSession,
+          transcriptPath: session.transcriptPath,
+          cwd: session.cwd,
+          model: session.model,
+        },
+        limit,
+      );
+    },
+    discoverSessions: () => harnessRegistry.discoverAll(),
+    watchExternalSessions: (onUpsert) => harnessRegistry.watchAll(onUpsert),
+  };
+
   const agentsRepo = new FileAgentsRepository(join(env.harnessHome, "agents"));
   const teamTasksWatcher = new ClaudeTeamTasksWatcher(env.claudeHome);
   const agentSessionLookup: SessionAgentLookupPort = {
@@ -163,11 +276,38 @@ export function createApp(options: CreateAppOptions = {}) {
     },
     listSessionIds: () => sessions.list({ archived: "all" }).map((s) => s.id),
   };
+  const isAgyTranscriptPath = (transcriptPath: string): boolean =>
+    transcriptPath.includes("antigravity") ||
+    transcriptPath.endsWith(".system_generated/logs/transcript.jsonl") ||
+    (Boolean(env.agyCliHome) && transcriptPath.startsWith(env.agyCliHome)) ||
+    (Boolean(env.agyIdeHome) && transcriptPath.startsWith(env.agyIdeHome!));
+
+  const agyAgentUnsubscribes = new Map<string, () => void>();
   const agentTranscriptWatcher: AgentTranscriptWatcherPort = {
-    watchFromStart: (watchKey, transcriptPath, onEvent) =>
-      watcher.watch(watchKey, transcriptPath, (ev) => onEvent(ev), { fromBeginning: true }),
-    unwatch: (watchKey) => watcher.unwatch(watchKey),
-    readRecentEvents: (transcriptPath, limit) => watcher.readRecentEvents(transcriptPath, limit),
+    watchFromStart: async (watchKey, transcriptPath, onEvent) => {
+      if (isAgyTranscriptPath(transcriptPath)) {
+        agyAgentUnsubscribes.get(watchKey)?.();
+        const stop = await agyAdapter.observeEvents(
+          { sessionId: watchKey, transcriptPath },
+          (ev) => onEvent(ev),
+          { fromBeginning: true },
+        );
+        agyAgentUnsubscribes.set(watchKey, stop);
+        return;
+      }
+      await watcher.watch(watchKey, transcriptPath, (ev) => onEvent(ev), { fromBeginning: true });
+    },
+    unwatch: (watchKey) => {
+      agyAgentUnsubscribes.get(watchKey)?.();
+      agyAgentUnsubscribes.delete(watchKey);
+      watcher.unwatch(watchKey);
+    },
+    readRecentEvents: (transcriptPath, limit) => {
+      if (isAgyTranscriptPath(transcriptPath)) {
+        return agyAdapter.readRecentEvents({ sessionId: "", transcriptPath }, limit);
+      }
+      return watcher.readRecentEvents(transcriptPath, limit);
+    },
   };
   const agentEventBus = new InMemoryAgentEventBus({
     publishAgentUpdated: (sessionId, agent) => {
@@ -219,7 +359,17 @@ export function createApp(options: CreateAppOptions = {}) {
         taskSubject: hook.taskSubject,
         taskStatus: hook.taskStatus,
       }),
-    onTranscriptEvent: (sessionId, event) => syncAgents.onMainTranscriptEvent(sessionId, event),
+    onTranscriptEvent: (sessionId, event) =>
+      syncAgents.onMainTranscriptEvent(sessionId, {
+        ...event,
+        agentRecord: event.agent
+          ? {
+              ...event.agent,
+              recentLogs: event.agent.recentLogs ?? [],
+              startedAt: event.agent.startedAt ?? event.agent.updatedAt,
+            }
+          : undefined,
+      }),
     deleteSession: (sessionId) => syncAgents.deleteSession(sessionId),
   };
 
@@ -233,15 +383,19 @@ export function createApp(options: CreateAppOptions = {}) {
     coordinator,
     fileChangeTracker,
     agentTelemetry,
+    harnessGateway,
   );
   const discovery = new SessionDiscoveryService({
     claudeHome: env.claudeHome,
     discoverUsecase,
     runner,
+    discoverExternalSessions: () => harnessRegistry.discoverAll(),
+    watchExternalSessions: (onUpsert) => harnessRegistry.watchAll(onUpsert),
   });
 
   const app = new Elysia()
     .use(errorPlugin({ host: env.host, token: env.token }))
+    .use(harnessRoutes({ registry: harnessRegistry }))
     .use(
       chatRoutes({
         sessions,
@@ -253,6 +407,7 @@ export function createApp(options: CreateAppOptions = {}) {
         workspace,
         fileChangeTracker,
         agentTelemetry,
+        harnessGateway,
         runtime: {
           port: env.port,
           token: env.token,
@@ -305,6 +460,8 @@ export function createApp(options: CreateAppOptions = {}) {
     agentsRepo,
     agentTelemetry,
     syncAgents,
+    harnessRegistry,
+    harnessGateway,
   };
 }
 
@@ -316,30 +473,45 @@ export async function reconcilePersistedSessions(
   coordinator?: InteractionCoordinator,
   fileChangeTracker?: FileChangeTrackerPort,
   agentTelemetry?: AgentTelemetryPort,
+  harnessGateway?: HarnessGatewayPort,
 ): Promise<void> {
   const active = await runner.listActiveSessions().catch(() => []);
   const activeNames = new Set(active.map((a) => a.name));
 
   for (const session of sessions.list({ archived: "all" })) {
-    const aliveInTmux = session.tmuxSession ? activeNames.has(session.tmuxSession) : false;
+    let current = session;
+    const aliveInTmux = current.tmuxSession ? activeNames.has(current.tmuxSession) : false;
 
-    if (!aliveInTmux && (session.status === "running" || session.status === "waiting_permission")) {
-      sessions.save(markStopped(session, systemClock));
+    if (!aliveInTmux && (current.status === "running" || current.status === "waiting_permission")) {
+      current = markStopped(current, systemClock);
+      sessions.save(current);
     }
 
     if (
-      !session.archivedAt &&
-      session.transcriptPath &&
-      (aliveInTmux || existsSync(session.transcriptPath))
+      !current.archivedAt &&
+      ((current.transcriptPath && (aliveInTmux || existsSync(current.transcriptPath))) ||
+        current.harnessId === "opencode")
     ) {
-      await watchTranscriptWithSync(session.id, session.transcriptPath, {
-        sessions,
-        watcher,
-        eventBus,
-        coordinator,
-        fileChangeTracker,
-        agentTelemetry,
-      });
+      if (harnessGateway) {
+        await observeHarnessSessionWithSync(current, {
+          sessions,
+          harnessGateway,
+          watcher,
+          eventBus,
+          coordinator,
+          fileChangeTracker,
+          agentTelemetry,
+        });
+      } else if (current.transcriptPath) {
+        await watchTranscriptWithSync(current.id, current.transcriptPath, {
+          sessions,
+          watcher,
+          eventBus,
+          coordinator,
+          fileChangeTracker,
+          agentTelemetry,
+        });
+      }
     }
   }
 }
@@ -373,6 +545,8 @@ if (import.meta.main) {
     discovery,
     fileChangeTracker,
     agentTelemetry,
+    harnessRegistry,
+    harnessGateway,
   } = createApp();
   await reconcilePersistedSessions(
     sessions,
@@ -382,6 +556,7 @@ if (import.meta.main) {
     coordinator,
     fileChangeTracker,
     agentTelemetry,
+    harnessGateway,
   );
   discovery.start();
 
@@ -391,6 +566,7 @@ if (import.meta.main) {
 
   const cleanup = () => {
     discovery.stop();
+    void harnessRegistry.dispose();
     try {
       rmSync(runtimePath, { force: true });
     } catch {

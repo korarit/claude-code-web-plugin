@@ -47,6 +47,7 @@ export interface AgentTranscriptEvent {
   toolUseId?: string;
   toolInput?: unknown;
   parentToolUseId?: string | null;
+  agentId?: string;
   usage?: AgentUsageRecord;
   costUsd?: number;
   model?: string;

@@ -10,7 +10,12 @@ import {
 } from "../domain/session.entity.ts";
 import { SessionNotFoundError } from "../domain/errors.ts";
 import type { SessionRepository } from "../domain/repository.port.ts";
-import type { EventBusPort, TerminalRunnerPort, TranscriptWatcherPort } from "./ports.ts";
+import type {
+  EventBusPort,
+  HarnessGatewayPort,
+  TerminalRunnerPort,
+  TranscriptWatcherPort,
+} from "./ports.ts";
 
 export interface UpdateSessionInput {
   sessionId: string;
@@ -25,6 +30,7 @@ export class UpdateSessionUsecase {
     private readonly watcher: TranscriptWatcherPort,
     private readonly eventBus: EventBusPort,
     private readonly clock: Clock = systemClock,
+    private readonly harnessGateway?: HarnessGatewayPort,
   ) {}
 
   async execute(input: UpdateSessionInput): Promise<Result<Session, AppError>> {
@@ -37,7 +43,9 @@ export class UpdateSessionUsecase {
     }
 
     if (input.archived === true && !next.archivedAt) {
-      if (next.tmuxSession) {
+      if (this.harnessGateway) {
+        await this.harnessGateway.stopSession(next).catch(() => {});
+      } else if (next.tmuxSession) {
         await this.runner.stopSession(next.tmuxSession).catch(() => {});
       }
       this.watcher.unwatch(next.id);

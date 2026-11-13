@@ -6,6 +6,11 @@ export interface Env {
   port: number;
   harnessHome: string;
   claudeHome: string;
+  agyCliHome: string;
+  agyIdeHome: string;
+  enableAgyIdeDiscovery: boolean;
+  opencodeDataHome: string;
+  opencodeServerUrl?: string;
   token: string;
   anthropicApiKey?: string;
   concurrencySoftLimit?: number;
@@ -42,6 +47,11 @@ export function parseEnv(
   const home = homedir();
   const harnessHome = env["HARNESS_WEB_HOME"] ?? join(home, ".harness-web");
   const claudeHome = env["CLAUDE_HOME"] ?? join(home, ".claude");
+  const agyCliHome = env["AGY_CLI_HOME"] ?? join(home, ".gemini", "antigravity-cli");
+  const agyIdeHome = env["AGY_IDE_HOME"] ?? join(home, ".gemini", "antigravity");
+  const enableAgyIdeDiscovery = env["HARNESS_AGY_IDE_DISCOVERY"] !== "false";
+  const opencodeDataHome = env["OPENCODE_DATA_HOME"] ?? join(home, ".local", "share", "opencode");
+  const opencodeServerUrl = env["OPENCODE_SERVER_URL"]?.trim() || undefined;
   const token = env["HARNESS_WEB_TOKEN"] ?? globalThis.crypto.randomUUID();
   const anthropicApiKey = env["ANTHROPIC_API_KEY"]?.trim() || undefined;
   const concurrencySoftLimit = Math.max(1, Number(env["HARNESS_CONCURRENCY_LIMIT"] ?? 3) || 3);
@@ -55,6 +65,11 @@ export function parseEnv(
     port,
     harnessHome,
     claudeHome,
+    agyCliHome,
+    agyIdeHome,
+    enableAgyIdeDiscovery,
+    opencodeDataHome,
+    opencodeServerUrl,
     token,
     anthropicApiKey,
     concurrencySoftLimit,

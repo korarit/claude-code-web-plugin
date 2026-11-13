@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import type { DiscoveredExternalSession } from "@contracts/harness";
 import { safeJsonParse, truncate } from "@core/utils";
 import type { DiscoverSessionUsecase } from "../application/discover-session.usecase.ts";
 import type { TerminalRunnerPort } from "../application/ports.ts";
@@ -67,12 +68,15 @@ export interface SessionDiscoveryConfig {
   claudeHome: string;
   discoverUsecase: DiscoverSessionUsecase;
   runner: TerminalRunnerPort;
+  discoverExternalSessions?: () => Promise<DiscoveredExternalSession[]>;
+  watchExternalSessions?: (onUpsert: (session: DiscoveredExternalSession) => void) => () => void;
   pollIntervalMs?: number;
   maxFilesPerScan?: number;
 }
 
 export class SessionDiscoveryService {
   private timer?: ReturnType<typeof setInterval>;
+  private unwatchExternal?: () => void;
   private scanning = false;
   private readonly fileCache = new Map<
     string,
@@ -84,6 +88,24 @@ export class SessionDiscoveryService {
   start(): void {
     if (this.timer) return;
     void this.scanOnce();
+    if (this.config.watchExternalSessions && !this.unwatchExternal) {
+      this.unwatchExternal = this.config.watchExternalSessions((item) => {
+        void this.config.discoverUsecase.execute({
+          externalSessionId: item.externalSessionId,
+          harnessId: item.harnessId,
+          transcriptPath: item.transcriptPath,
+          cwd: item.cwd,
+          origin: item.origin,
+          controlMode: item.controlMode,
+          tmuxSession: item.tmuxSession,
+          model: item.model,
+          title: item.title,
+          lastMessagePreview: item.lastMessagePreview,
+          messageCount: item.messageCount,
+          isActiveTmux: item.isActiveTmux,
+        });
+      });
+    }
     const interval = this.config.pollIntervalMs ?? 5_000;
     this.timer = setInterval(() => {
       void this.scanOnce();
@@ -95,12 +117,38 @@ export class SessionDiscoveryService {
       clearInterval(this.timer);
       this.timer = undefined;
     }
+    this.unwatchExternal?.();
+    this.unwatchExternal = undefined;
   }
 
   async scanOnce(): Promise<void> {
     if (this.scanning) return;
     this.scanning = true;
     try {
+      if (this.config.discoverExternalSessions) {
+        const items = await this.config.discoverExternalSessions().catch(() => []);
+        const seenExternalIds = new Set<string>();
+        for (const item of items) {
+          seenExternalIds.add(item.externalSessionId);
+          await this.config.discoverUsecase.execute({
+            externalSessionId: item.externalSessionId,
+            harnessId: item.harnessId,
+            transcriptPath: item.transcriptPath,
+            cwd: item.cwd,
+            origin: item.origin,
+            controlMode: item.controlMode,
+            tmuxSession: item.tmuxSession,
+            model: item.model,
+            title: item.title,
+            lastMessagePreview: item.lastMessagePreview,
+            messageCount: item.messageCount,
+            isActiveTmux: item.isActiveTmux,
+          });
+        }
+        this.config.discoverUsecase.reconcileStaleExternalTmux(seenExternalIds);
+        return;
+      }
+
       const activeTmux = await this.config.runner.listActiveSessions().catch(() => []);
       const externalClaudeTmuxByCwd = new Map<string, string>();
       const activeTmuxNames = new Set(activeTmux.map((t) => t.name));

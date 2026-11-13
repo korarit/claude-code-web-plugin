@@ -4,6 +4,8 @@ import { isoNow, systemClock, type Clock } from "@core/time";
 import type { AppError } from "@core/errors";
 import {
   adoptToInteractive,
+  attachExternalSession,
+  attachTranscript,
   unarchiveSession,
   type Session,
 } from "../domain/session.entity.ts";
@@ -14,11 +16,12 @@ import type {
   AgentTelemetryPort,
   EventBusPort,
   FileChangeTrackerPort,
+  HarnessGatewayPort,
   TerminalRunnerPort,
   TranscriptWatcherPort,
 } from "./ports.ts";
 import type { SendMessageRuntime } from "./send-message.usecase.ts";
-import { watchTranscriptWithSync } from "./transcript-sync.ts";
+import { observeHarnessSessionWithSync, watchTranscriptWithSync } from "./transcript-sync.ts";
 
 export interface ResumeSessionInput {
   sessionId: string;
@@ -43,6 +46,7 @@ export class ResumeSessionUsecase {
     private readonly coordinator?: InteractionCoordinator,
     private readonly fileChangeTracker?: FileChangeTrackerPort,
     private readonly agentTelemetry?: AgentTelemetryPort,
+    private readonly harnessGateway?: HarnessGatewayPort,
   ) {}
 
   async execute(input: ResumeSessionInput): Promise<Result<ResumeSessionOutput, AppError>> {
@@ -53,37 +57,66 @@ export class ResumeSessionUsecase {
     const authMode = input.authMode ?? existing.authMode ?? "machine_default";
     const agentProfile = input.agentProfile?.trim() || existing.agentProfile;
 
-    if (authMode === "api_key" && !this.runtime.anthropicApiKey) {
+    if (existing.harnessId === "claude" && authMode === "api_key" && !this.runtime.anthropicApiKey) {
       return err(new ApiKeyNotConfiguredError());
     }
 
     const cwd = existing.cwd || this.runtime.defaultCwd;
     const resumeId = existing.externalSessionId ?? existing.id;
 
-    const ensured = await this.runner.ensureSession({
-      sessionId: existing.id,
-      model,
-      cwd,
-      port: this.runtime.port,
-      token: this.runtime.token,
-      resumeSessionId: resumeId,
-      authMode,
-      apiKey: authMode === "api_key" ? this.runtime.anthropicApiKey : undefined,
-      agentProfile,
-      tmuxSessionName: existing.controlMode === "interactive" ? existing.tmuxSession : undefined,
-    });
+    let tmuxSession = existing.tmuxSession;
+    let externalSessionId = existing.externalSessionId;
+    let transcriptPath = existing.transcriptPath;
+
+    if (this.harnessGateway) {
+      const started = await this.harnessGateway.startOrResumeSession(existing.harnessId, {
+        sessionId: existing.id,
+        model,
+        cwd,
+        port: this.runtime.port,
+        token: this.runtime.token,
+        resumeSessionId: resumeId,
+        authMode,
+        apiKey: authMode === "api_key" ? this.runtime.anthropicApiKey : undefined,
+        agentProfile,
+        tmuxSessionName: existing.controlMode === "interactive" ? existing.tmuxSession : undefined,
+      });
+      tmuxSession = started.tmuxSession;
+      if (started.externalSessionId) externalSessionId = started.externalSessionId;
+      if (started.transcriptPath && !transcriptPath) transcriptPath = started.transcriptPath;
+    } else {
+      const ensured = await this.runner.ensureSession({
+        sessionId: existing.id,
+        model,
+        cwd,
+        port: this.runtime.port,
+        token: this.runtime.token,
+        resumeSessionId: resumeId,
+        authMode,
+        apiKey: authMode === "api_key" ? this.runtime.anthropicApiKey : undefined,
+        agentProfile,
+        tmuxSessionName: existing.controlMode === "interactive" ? existing.tmuxSession : undefined,
+      });
+      tmuxSession = ensured.tmuxSession;
+    }
 
     let updated = existing.archivedAt ? unarchiveSession(existing, this.clock) : existing;
     updated = adoptToInteractive(
       updated,
       {
-        tmuxSession: ensured.tmuxSession,
+        tmuxSession,
         model,
         authMode,
         agentProfile,
       },
       this.clock,
     );
+    if (externalSessionId) {
+      updated = attachExternalSession(updated, externalSessionId, this.clock);
+    }
+    if (transcriptPath) {
+      updated = attachTranscript(updated, transcriptPath, this.clock);
+    }
 
     this.sessions.save(updated);
     this.eventBus.publishListEvent({ type: "upsert", session: updated });
@@ -93,7 +126,18 @@ export class ResumeSessionUsecase {
       timestamp: isoNow(this.clock),
     });
 
-    if (updated.transcriptPath) {
+    if (this.harnessGateway) {
+      await observeHarnessSessionWithSync(updated, {
+        sessions: this.sessions,
+        harnessGateway: this.harnessGateway,
+        watcher: this.watcher,
+        eventBus: this.eventBus,
+        coordinator: this.coordinator,
+        fileChangeTracker: this.fileChangeTracker,
+        agentTelemetry: this.agentTelemetry,
+        clock: this.clock,
+      });
+    } else if (updated.transcriptPath) {
       await watchTranscriptWithSync(updated.id, updated.transcriptPath, {
         sessions: this.sessions,
         watcher: this.watcher,

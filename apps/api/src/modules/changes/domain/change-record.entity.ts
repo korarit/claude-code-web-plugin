@@ -5,7 +5,21 @@ import type {
   SessionFileChange,
 } from "@contracts/changes";
 
-export const FILE_EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+export const FILE_EDIT_TOOLS = new Set([
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit",
+  "write_to_file",
+  "replace_file_content",
+  "multi_replace_file_content",
+  "write_file",
+  "edit_file",
+  "edit",
+  "write",
+  "patch",
+  "multiedit",
+]);
 
 export function isFileEditTool(toolName?: string): boolean {
   return Boolean(toolName && FILE_EDIT_TOOLS.has(toolName));
@@ -19,7 +33,12 @@ export function extractToolTargetPath(toolName: string, toolInput: unknown): str
   const candidate =
     toolName === "NotebookEdit"
       ? (obj["notebook_path"] ?? obj["file_path"] ?? obj["path"])
-      : (obj["file_path"] ?? obj["path"] ?? obj["notebook_path"]);
+      : (obj["file_path"] ??
+        obj["filePath"] ??
+        obj["TargetFile"] ??
+        obj["Path"] ??
+        obj["path"] ??
+        obj["notebook_path"]);
   return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
 }
 

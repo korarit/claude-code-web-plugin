@@ -1,4 +1,4 @@
-import type { SessionOrigin } from "@contracts/chat";
+import type { HarnessId, SessionControlMode, SessionOrigin } from "@contracts/chat";
 import { newSessionId } from "@core/ids";
 import { isoNow, systemClock, type Clock } from "@core/time";
 import {
@@ -15,16 +15,21 @@ import type {
   AgentTelemetryPort,
   EventBusPort,
   FileChangeTrackerPort,
+  HarnessGatewayPort,
   TranscriptWatcherPort,
 } from "./ports.ts";
-import { watchTranscriptWithSync } from "./transcript-sync.ts";
+import { observeHarnessSessionWithSync, watchTranscriptWithSync } from "./transcript-sync.ts";
 
 export interface DiscoveredSessionInput {
   externalSessionId: string;
+  harnessId?: HarnessId;
   transcriptPath?: string;
   cwd?: string;
   origin: SessionOrigin;
+  controlMode?: SessionControlMode;
   tmuxSession?: string;
+  model?: string;
+  title?: string;
   lastMessagePreview?: string;
   messageCount?: number;
   isActiveTmux?: boolean;
@@ -39,6 +44,7 @@ export class DiscoverSessionUsecase {
     private readonly coordinator?: InteractionCoordinator,
     private readonly fileChangeTracker?: FileChangeTrackerPort,
     private readonly agentTelemetry?: AgentTelemetryPort,
+    private readonly harnessGateway?: HarnessGatewayPort,
   ) {}
 
   async execute(input: DiscoveredSessionInput): Promise<Session> {
@@ -58,6 +64,10 @@ export class DiscoverSessionUsecase {
       }
       if (input.tmuxSession && updated.tmuxSession !== input.tmuxSession) {
         updated = attachTmuxSession(updated, input.tmuxSession, this.clock);
+        changed = true;
+      }
+      if (input.title && !updated.title) {
+        updated = { ...updated, title: input.title };
         changed = true;
       }
       if (
@@ -86,14 +96,27 @@ export class DiscoverSessionUsecase {
       return updated;
     }
 
+    const harnessId: HarnessId = input.harnessId ?? "claude";
     const isTmux = input.origin === "tmux" && Boolean(input.tmuxSession);
+    const controlMode: SessionControlMode =
+      input.controlMode ?? (isTmux ? "interactive" : "mirror");
+    const defaultModel =
+      input.model ??
+      this.harnessGateway?.getDefaultModel(harnessId) ??
+      (harnessId === "agy"
+        ? "gemini-2.5-pro"
+        : harnessId === "opencode"
+          ? "anthropic/claude-sonnet-4-5"
+          : "sonnet");
+
     const created = createSession(
       {
         id: newSessionId(),
-        model: "sonnet",
-        harnessId: "claude",
+        title: input.title,
+        model: defaultModel,
+        harnessId,
         origin: input.origin,
-        controlMode: isTmux ? "interactive" : "mirror",
+        controlMode,
         status: isTmux ? (input.isActiveTmux ? "idle" : "stopped") : "idle",
         externalSessionId: input.externalSessionId,
         discoveredAt: isoNow(this.clock),
@@ -109,7 +132,18 @@ export class DiscoverSessionUsecase {
     this.sessions.save(created);
     this.eventBus.publishListEvent({ type: "upsert", session: created });
 
-    if (created.transcriptPath) {
+    if (this.harnessGateway && (created.transcriptPath || created.harnessId === "opencode")) {
+      await observeHarnessSessionWithSync(created, {
+        sessions: this.sessions,
+        harnessGateway: this.harnessGateway,
+        watcher: this.watcher,
+        eventBus: this.eventBus,
+        coordinator: this.coordinator,
+        fileChangeTracker: this.fileChangeTracker,
+        agentTelemetry: this.agentTelemetry,
+        clock: this.clock,
+      });
+    } else if (created.transcriptPath) {
       await watchTranscriptWithSync(created.id, created.transcriptPath, {
         sessions: this.sessions,
         watcher: this.watcher,
@@ -122,5 +156,17 @@ export class DiscoverSessionUsecase {
     }
 
     return created;
+  }
+
+  reconcileStaleExternalTmux(seenExternalIds: Set<string>): void {
+    for (const session of this.sessions.list({ archived: false })) {
+      if (!session.externalSessionId?.startsWith("tmux:")) continue;
+      if (session.status === "stopped") continue;
+      if (!seenExternalIds.has(session.externalSessionId)) {
+        const stopped = markStopped(session, this.clock);
+        this.sessions.save(stopped);
+        this.eventBus.publishListEvent({ type: "upsert", session: stopped });
+      }
+    }
   }
 }

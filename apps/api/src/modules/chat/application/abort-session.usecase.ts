@@ -5,7 +5,7 @@ import { clearPendingInteraction, markIdle, type Session } from "../domain/sessi
 import { SessionNotFoundError, SessionNotRunningError } from "../domain/errors.ts";
 import type { SessionRepository } from "../domain/repository.port.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
-import type { EventBusPort, TerminalRunnerPort } from "./ports.ts";
+import type { EventBusPort, HarnessGatewayPort, TerminalRunnerPort } from "./ports.ts";
 
 export class AbortSessionUsecase {
   constructor(
@@ -14,15 +14,25 @@ export class AbortSessionUsecase {
     private readonly eventBus: EventBusPort,
     private readonly clock: Clock = systemClock,
     private readonly coordinator?: InteractionCoordinator,
+    private readonly harnessGateway?: HarnessGatewayPort,
   ) {}
 
   async execute(sessionId: string): Promise<Result<Session, AppError>> {
     const existing = this.sessions.get(sessionId);
     if (!existing) return err(new SessionNotFoundError(sessionId));
-    if (!existing.tmuxSession) return err(new SessionNotRunningError(sessionId));
+    if (existing.harnessId !== "opencode" && !existing.tmuxSession) {
+      return err(new SessionNotRunningError(sessionId));
+    }
+    if (existing.harnessId === "opencode" && !existing.externalSessionId) {
+      return err(new SessionNotRunningError(sessionId));
+    }
 
     this.coordinator?.cancelSession(existing.id);
-    await this.runner.abortSession(existing.tmuxSession);
+    if (this.harnessGateway) {
+      await this.harnessGateway.abortSession(existing);
+    } else if (existing.tmuxSession) {
+      await this.runner.abortSession(existing.tmuxSession);
+    }
     let next = clearPendingInteraction(existing, this.clock);
     next = markIdle(next, this.clock);
     this.sessions.save(next);

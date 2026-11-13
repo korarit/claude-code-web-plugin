@@ -11,11 +11,11 @@ import {
 import { clearPendingInteraction, markRunning, type Session } from "../domain/session.entity.ts";
 import type { SessionRepository } from "../domain/repository.port.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
-import type { EventBusPort, TerminalRunnerPort } from "./ports.ts";
+import type { EventBusPort, HarnessGatewayPort, TerminalRunnerPort } from "./ports.ts";
 
 export interface SendInputOutput {
   session: Session;
-  method: "hook" | "tmux";
+  method: "hook" | "tmux" | "server_api";
   resolved: boolean;
 }
 
@@ -126,6 +126,7 @@ export class SendInputUsecase {
     private readonly eventBus: EventBusPort,
     private readonly coordinator: InteractionCoordinator,
     private readonly clock: Clock = systemClock,
+    private readonly harnessGateway?: HarnessGatewayPort,
   ) {}
 
   async execute(input: ChatInputRequest): Promise<Result<SendInputOutput, AppError>> {
@@ -155,21 +156,43 @@ export class SendInputUsecase {
       if (session.controlMode === "mirror") {
         return err(new MirrorSessionError(session.id));
       }
-      if (!session.tmuxSession) {
-        return err(new SessionNotRunningError(session.id));
+
+      const interactionId = input.interactionId ?? session.pendingInteraction?.id;
+      let method: "tmux" | "server_api" = "tmux";
+
+      if (this.harnessGateway) {
+        if (session.harnessId !== "opencode" && !session.tmuxSession) {
+          return err(new SessionNotRunningError(session.id));
+        }
+        if (session.harnessId === "opencode" && !session.externalSessionId) {
+          return err(new SessionNotRunningError(session.id));
+        }
+        const res = await this.harnessGateway.sendInput(
+          session,
+          { ...input, interactionId },
+          session.pendingInteraction,
+        );
+        if (!res.handled) {
+          return err(new SessionNotRunningError(session.id));
+        }
+        method = res.method === "server_api" ? "server_api" : "tmux";
+      } else {
+        if (!session.tmuxSession) {
+          return err(new SessionNotRunningError(session.id));
+        }
+        const fallbackKey =
+          decision === "allow_once" ? "1" : decision === "always_allow" ? "2" : "3";
+        await this.runner.sendRawKeys(session.tmuxSession, fallbackKey);
       }
 
-      const fallbackKey =
-        decision === "allow_once" ? "1" : decision === "always_allow" ? "2" : "3";
-      await this.runner.sendRawKeys(session.tmuxSession, fallbackKey);
-
+      this.coordinator.clearPending(session.id, interactionId);
       let updated = clearPendingInteraction(session, this.clock);
       updated = markRunning(updated, this.clock);
       this.sessions.save(updated);
       this.eventBus.publishListEvent({ type: "upsert", session: updated });
       this.eventBus.publish(session.id, {
         type: "interaction_resolved",
-        interactionId: input.interactionId ?? session.pendingInteraction?.id,
+        interactionId,
         timestamp: isoNow(this.clock),
       });
       this.eventBus.publish(session.id, {
@@ -178,34 +201,101 @@ export class SendInputUsecase {
         timestamp: isoNow(this.clock),
       });
 
-      return ok({ session: updated, method: "tmux", resolved: true });
+      return ok({ session: updated, method, resolved: true });
     }
 
     if (session.controlMode === "mirror") {
       return err(new MirrorSessionError(session.id));
     }
-    if (!session.tmuxSession) {
+    if (session.harnessId !== "opencode" && !session.tmuxSession) {
       return err(new SessionNotRunningError(session.id));
+    }
+    if (session.harnessId === "opencode" && !session.externalSessionId) {
+      return err(new SessionNotRunningError(session.id));
+    }
+
+    if (input.inputType === "key") {
+      const key = String(input.value).trim();
+      if (!ALLOWED_KEYS.has(key)) {
+        return err(new ChatBadRequestError(`unsupported key: ${key}`));
+      }
+      if (this.harnessGateway) {
+        await this.harnessGateway.sendInput(session, { ...input, value: key });
+      } else {
+        await this.runner.sendRawKeys(session.tmuxSession!, key);
+      }
+      return ok({ session, method: "tmux", resolved: false });
+    }
+
+    if (input.inputType === "text") {
+      const text = String(input.value ?? "");
+      if (!text.trim()) {
+        return err(new ChatBadRequestError("input text must not be empty"));
+      }
+      if (this.harnessGateway) {
+        const pending = session.pendingInteraction ?? this.coordinator.getPending(session.id);
+        const res = await this.harnessGateway.sendInput(
+          session,
+          { ...input, interactionId: input.interactionId ?? pending?.id },
+          pending,
+        );
+        if (res.resolved) {
+          const updated = clearPendingInteraction(session, this.clock);
+          this.sessions.save(updated);
+          this.eventBus.publishListEvent({ type: "upsert", session: updated });
+          this.eventBus.publish(session.id, {
+            type: "interaction_resolved",
+            interactionId: input.interactionId ?? pending?.id,
+            timestamp: isoNow(this.clock),
+          });
+          return ok({ session: updated, method: res.method, resolved: true });
+        }
+        return ok({ session, method: res.method, resolved: false });
+      }
+      await this.runner.sendPrompt(session.tmuxSession!, text);
+      return ok({ session, method: "tmux", resolved: false });
     }
 
     if (input.inputType === "selection") {
       const pending = session.pendingInteraction ?? this.coordinator.getPending(session.id);
+      const interactionId = input.interactionId ?? pending?.id;
+      if (this.harnessGateway) {
+        const res = await this.harnessGateway.sendInput(
+          session,
+          { ...input, interactionId },
+          pending,
+        );
+        if (res.resolved) {
+          let updated = clearPendingInteraction(session, this.clock);
+          updated = markRunning(updated, this.clock);
+          this.sessions.save(updated);
+          this.eventBus.publishListEvent({ type: "upsert", session: updated });
+          this.eventBus.publish(session.id, {
+            type: "interaction_resolved",
+            interactionId,
+            timestamp: isoNow(this.clock),
+          });
+          return ok({ session: updated, method: res.method, resolved: true });
+        }
+        return ok({ session, method: res.method, resolved: false });
+      }
+
       if (pending && pending.kind === "question") {
         // Best-effort capture pane to confirm TUI is responsive before injecting keys.
-        await this.runner.capturePane?.(session.tmuxSession, 40).catch(() => "");
+        await this.runner.capturePane?.(session.tmuxSession!, 40).catch(() => "");
         const steps = buildQuestionKeystrokes(pending.questions, input.value);
         for (const step of steps) {
           if (step.keys && step.keys.length > 0) {
             if (this.runner.sendKeysSequence) {
-              await this.runner.sendKeysSequence(session.tmuxSession, step.keys);
+              await this.runner.sendKeysSequence(session.tmuxSession!, step.keys);
             } else {
               for (const k of step.keys) {
-                await this.runner.sendRawKeys(session.tmuxSession, k);
+                await this.runner.sendRawKeys(session.tmuxSession!, k);
               }
             }
           }
           if (step.text) {
-            await this.runner.sendPrompt(session.tmuxSession, step.text);
+            await this.runner.sendPrompt(session.tmuxSession!, step.text);
           }
         }
         return ok({ session, method: "tmux", resolved: false });
@@ -216,25 +306,7 @@ export class SendInputUsecase {
         : typeof input.value === "string"
           ? input.value
           : JSON.stringify(input.value);
-      await this.runner.sendPrompt(session.tmuxSession, fallbackText);
-      return ok({ session, method: "tmux", resolved: false });
-    }
-
-    if (input.inputType === "key") {
-      const key = String(input.value).trim();
-      if (!ALLOWED_KEYS.has(key)) {
-        return err(new ChatBadRequestError(`unsupported key: ${key}`));
-      }
-      await this.runner.sendRawKeys(session.tmuxSession, key);
-      return ok({ session, method: "tmux", resolved: false });
-    }
-
-    if (input.inputType === "text") {
-      const text = String(input.value ?? "");
-      if (!text.trim()) {
-        return err(new ChatBadRequestError("input text must not be empty"));
-      }
-      await this.runner.sendPrompt(session.tmuxSession, text);
+      await this.runner.sendPrompt(session.tmuxSession!, fallbackText);
       return ok({ session, method: "tmux", resolved: false });
     }
 
