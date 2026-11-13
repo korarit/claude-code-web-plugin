@@ -39,16 +39,16 @@
        - Refactor จาก `tmux-runner.ts` + `jsonl-watcher.ts` (Phase 1–3)
        - Permission ผ่าน blocking `PermissionRequest` hook; Option UI (`AskUserQuestion`) ผ่าน `.jsonl` + `tmux send-keys`
        - Subagents: ตาม `agent_transcript_path` จาก `SubagentStart` hook ส่งเข้า Subagent Tree & Drill-down (Phase 4)
-       - File Changes: map tool calls (`Edit`, `Write`, `MultiEdit`) → `file_changed` (Phase 3)
+       - File Changes: map tool calls (`Edit`, `Write`, `MultiEdit`) → `file_changed` พร้อม `harnessId: "claude"` และ `model` ที่แก้ (Phase 3)
     2. `AntigravityHarnessAdapter`:
        - ใช้ `tmux` run `agy` + `load-buffer`/`paste-buffer`
        - Tail `~/.gemini/antigravity-cli/brain/<convId>/.system_generated/logs/transcript.jsonl` (map `USER_INPUT`, `PLANNER_RESPONSE`, `tool_calls`, `thinking` → `DomainChatEvent`)
        - Permission ผ่าน blocking `PreToolUse` hook (รองรับ decisions: `auto_approve` / `deny` / `ask` / `force_ask` — ไม่มี `PermissionRequest` หรือ `Notification` hook แยกเหมือน Claude); Option UI ผ่าน `transcript.jsonl` + `tmux capture-pane`/`send-keys` + Terminal Drawer fallback
        - Subagents: ตรวจจับ `invoke_subagent` จาก `transcript.jsonl` แล้ว tail `~/.gemini/antigravity-cli/brain/<subagentConvId>/.system_generated/logs/transcript.jsonl` เข้า Subagent Tree
-       - File Changes: map file write/edit tools (`write_to_file`, `replace_file_content`, etc.) → `file_changed` สำหรับ `ChangesDrawer`
+       - File Changes: map file write/edit tools (`write_to_file`, `replace_file_content`, etc.) → `file_changed` พร้อม `harnessId: "agy"` และ `model` จริงของ turn นั้นสำหรับ `ChangesDrawer`
     3. `OpenCodeHarnessAdapter`:
        - บริหาร lifecycle ของ `opencode serve --port <ephemeral>` (เช่น 1 managed daemon ต่อ workspace หรือ attach เข้า `opencode serve` ที่รันอยู่แล้ว) พร้อม healthcheck และ clean shutdown
-       - Normalize SSE events (`message.*`, `session.*`, `tool.*`, `permission.asked`, `question.asked`, file edit events) → `DomainChatEvent`, `PendingInteraction` & `file_changed`
+       - Normalize SSE events (`message.*`, `session.*`, `tool.*`, `permission.asked`, `question.asked`, file edit events) → `DomainChatEvent`, `PendingInteraction` & `file_changed` (แนบ `harnessId: "opencode"` และ `provider/model` ของ turn นั้น)
        - ส่งคำตอบ permission/question กลับผ่าน REST endpoints (`/permission`, `/question`) ของ OpenCode server โดยตรง
        - Subagents: subscribe `/global/event` แล้วจับ child sessions ที่มี `parentID` เข้า Subagent Tree & Drill-down
   - **Registry & Endpoint:** `HarnessRegistry` + `GET /api/harnesses` คืนรายการ 3 harnesses พร้อมสถานะความพร้อมบนเครื่อง, models ที่มีจริง และ agent profiles (`--agent` สำหรับ `claude` / `agy`)

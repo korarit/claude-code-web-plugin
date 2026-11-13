@@ -53,7 +53,7 @@
 
 ### 4.1 Persistence (`apps/api` — `session` / `sync` store)
 - เพิ่ม persistent store (SQLite ผ่าน `bun:sqlite` หรือ append-only JSONL ใน `~/.harness-web/sessions/`) สำหรับเก็บ `CanonicalSession`, `canonicalEvents[]`, และ `bindings` (ทนต่อการ restart server)
-- สร้าง `CanonicalEventNormalizer` แปลง event ของ `claude`, `agy`, `opencode` ให้เป็น `CanonicalEvent` กลางที่มี `seq`, `harnessId`, `role`, `text`, `toolCalls[]` (เก็บเฉพาะ input/output ที่จำเป็นครบถ้วนโดยไม่ตัดใจความสำคัญ)
+- สร้าง `CanonicalEventNormalizer` แปลง event ของ `claude`, `agy`, `opencode` ให้เป็น `CanonicalEvent` กลางที่มี `seq`, `harnessId`, `model`, `role`, `text`, `toolCalls[]` (เก็บครบทั้ง attribution ว่า harness/model ใดเป็นผู้แก้ไฟล์ในแต่ละ revision สำหรับ `ChangesDrawer` ด้วย)
 
 ### 4.2 Application Usecases (`apps/api`)
 - `SwitchHarnessUsecase`: ตรวจ availability ของ target harness, อัปเดต `activeHarness`, บันทึก switch marker event (`harness_switched`)

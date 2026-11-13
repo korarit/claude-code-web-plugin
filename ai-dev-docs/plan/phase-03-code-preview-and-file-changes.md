@@ -21,32 +21,36 @@
 ### 3.1 Contracts (`packages/contracts`)
 - สร้าง `src/changes.ts` (หรือขยาย `chat.ts`):
   - `FileChangeStatus = "added" | "modified" | "deleted" | "renamed"`
-  - `SessionFileChange`: `{ path, status: FileChangeStatus, additions: number, deletions: number, source: "session_tool" | "git_workspace", lastUpdatedAt: string, agentId?: string }`
-  - `FileDiffResponse`: `{ path, status, mode: "session" | "git", originalText: string | null, modifiedText: string | null, unifiedDiff: string, isBinary: boolean, truncated: boolean }`
-- เพิ่ม `"file_changed"` ใน `ChatEventType` สำหรับแจ้ง UI แบบ real-time
+  - `FileEditAttribution`: `{ harnessId: string; model: string; agentId?: string }`
+  - `FileEditRevision`: `{ revId: string; seq?: number; harnessId: string; model: string; agentId?: string; toolName: string; additions: number; deletions: number; editedAt: string }`
+  - `SessionFileChange`: `{ path, status: FileChangeStatus, additions: number, deletions: number, source: "session_tool" | "git_workspace", lastUpdatedAt: string, lastEditedBy: FileEditAttribution, contributors: FileEditAttribution[], revisions: FileEditRevision[] }`
+  - `FileDiffResponse`: `{ path, status, mode: "session" | "git", revId?: string, editedBy?: FileEditAttribution, originalText: string | null, modifiedText: string | null, unifiedDiff: string, isBinary: boolean, truncated: boolean }`
+- เพิ่ม `"file_changed"` ใน `ChatEventType` สำหรับแจ้ง UI แบบ real-time (พร้อม `harnessId` + `model` ของผู้แก้)
 
 ### 3.2 Backend (`apps/api` — bounded context `workspace` / `changes` หรือ sub-module)
-- **Snapshot & Diff Service:**
-  - `PreToolUse` (สำหรับ tool แก้ไฟล์): บันทึก baseline content ของไฟล์ (ถ้ายังไม่เคยบันทึกใน session) ลง `~/.harness-web/snapshots/<sessionId>/`
-  - `PostToolUse` / `.jsonl` parser: คำนวณ `+additions / -deletions` และ emit `"file_changed"` เข้า `EventBusPort` ของ session
+- **Snapshot, Attribution & Diff Service:**
+  - `PreToolUse` (สำหรับ tool แก้ไฟล์): บันทึก baseline content ของไฟล์ (ถ้ายังไม่เคยบันทึกใน session) + per-revision snapshot ลง `~/.harness-web/snapshots/<sessionId>/`
+  - `PostToolUse` / `.jsonl` parser: คำนวณ `+additions / -deletions`, ผูก **`harnessId` และ `model` ณ turn นั้น** (รวมถึง model ของ subagent กรณีใช้คนละโมเดลกับตัวแม่) ลง `revisions[]` / `lastEditedBy` และ emit `"file_changed"` เข้า `EventBusPort` ของ session
   - Path security: normalize และบังคับ `resolvedPath` ให้อยู่ภายใต้ `session.cwd` เสมอ (กัน `../` traversal และ symlink escape)
 - **Endpoints:**
   - `GET /api/chat/sessions/:id/changes` → คืนรายการ `SessionFileChange[]` + summary (`filesCount`, `totalAdditions`, `totalDeletions`)
-  - `GET /api/chat/sessions/:id/changes/diff?path=<relPath>&mode=session|git` → คืน `FileDiffResponse` (รองรับ binary check และ size cap)
+  - `GET /api/chat/sessions/:id/changes/diff?path=<relPath>&mode=session|git&revId=<id>` → คืน `FileDiffResponse` (ดู diff รวมทั้ง session หรือเจาะจงเฉพาะ revision ของ harness/model ที่ต้องการ; รองรับ binary check และ size cap)
   - `GET /api/chat/sessions/:id/files/raw?path=<relPath>` → อ่านไฟล์เต็มสำหรับ Code Preview
   - `POST /api/chat/sessions/:id/changes/revert` → ย้อนเฉพาะไฟล์กลับไปที่ before-snapshot ของ session (หรือ `git checkout -- <path>`) พร้อมตรวจ path safety
 
 ### 3.3 Frontend (`apps/web`)
 - **`ChangesDrawer` / Split Panel (Right-side Drawer หรือ Tab `Changes (N)`):**
-  - แสดงรายชื่อไฟล์ที่เปลี่ยนพร้อม badge (`M`, `A`, `D`, `R`) และตัวเลข `+N / -M`
+  - แสดงรายชื่อไฟล์ที่เปลี่ยนพร้อม badge (`M`, `A`, `D`, `R`), ตัวเลข `+N / -M`, และ **Attribution Badge (`harnessId · model`)** เช่น `claude · sonnet` (ถ้าหลายโมเดล/harness แก้ไฟล์เดียวกันให้แสดง count/list ของผู้แก้ทั้งหมด)
+  - Filter รายการไฟล์ตาม `harnessId` / `model` / `agentId` ได้
   - Toggle สลับโหมดดู **Session Changes** (เฉพาะไฟล์ที่ session นี้แก้) กับ **All Git Changes** (`git status`/`git diff`)
-  - **Diff Viewer:** สลับระหว่าง **Unified Diff** กับ **Side-by-Side Diff** พร้อม syntax highlighting, line numbers, ปุ่ม Copy path/code, ปุ่ม View Full File และปุ่ม Revert (มี confirm modal)
+  - **Diff Viewer:** เลือกดูแบบ **Cumulative Diff** หรือ **Per-Revision Diff** (เฉพาะรอบที่ model/harness ตัวนั้นแก้), สลับ **Unified Diff** กับ **Side-by-Side Diff** พร้อม syntax highlighting, line numbers, ปุ่ม Copy path/code, ปุ่ม View Full File และปุ่ม Revert (มี confirm modal)
 - **Inline File Pills ใน `ChatView.tsx`:**
-  - ข้อความ/tool block ที่แก้ไฟล์ (เช่น `Edited src/app.ts (+12 -3)`) คลิกแล้วเปิด `ChangesDrawer` กระโดดไปไฟล์นั้นทันที
+  - ข้อความ/tool block ที่แก้ไฟล์ (เช่น `Edited src/app.ts (+12 -3) · sonnet`) คลิกแล้วเปิด `ChangesDrawer` กระโดดไปไฟล์/revision นั้นทันที
 
 ## 4. Exit Criteria / Verification
 
-1. Session แก้ไขหรือสร้างไฟล์ผ่าน `Edit`/`Write` → badge `Changes (N)` และรายการไฟล์อัปเดตทันทีผ่าน SSE โดยไม่ต้องรีเฟรชหน้า
-2. เปิด 2 sessions ใน repo เดียวกันแก้คนละไฟล์ → โหมด `Session Changes` ของแต่ละห้องแสดงเฉพาะไฟล์ที่ session ตัวเองแก้ ไม่ปนกัน
-3. คลิกไฟล์ใน drawer หรือ pill ในแชท → preview โค้ดแบบ Unified / Side-by-Side diff และดูไฟล์เต็มได้ถูกต้อง (ทดสอบ path traversal `../` ต้องถูก reject `400/403`)
-4. Agent แก้ไฟล์ผ่าน `Bash` (เช่น `echo ... > file`) → โหมด `All Git Changes` แสดงการเปลี่ยนแปลงได้ครบ
+1. Session แก้ไขหรือสร้างไฟล์ผ่าน `Edit`/`Write` → badge `Changes (N)`, ชื่อไฟล์, และ attribution badge (`harnessId · model`) อัปเดตทันทีผ่าน SSE โดยไม่ต้องรีเฟรชหน้า
+2. สลับ model กลาง session (เช่น `sonnet` → `opus`) แล้วแก้ไฟล์เดิมซ้ำ → `revisions[]` แยกประวัติและ diff ของแต่ละ model ได้ถูกต้อง
+3. เปิด 2 sessions ใน repo เดียวกันแก้คนละไฟล์ → โหมด `Session Changes` ของแต่ละห้องแสดงเฉพาะไฟล์ที่ session ตัวเองแก้ ไม่ปนกัน
+4. คลิกไฟล์ใน drawer หรือ pill ในแชท → preview โค้ดแบบ Unified / Side-by-Side diff และดูไฟล์เต็มได้ถูกต้อง (ทดสอบ path traversal `../` ต้องถูก reject `400/403`)
+5. Agent แก้ไฟล์ผ่าน `Bash` (เช่น `echo ... > file`) → โหมด `All Git Changes` แสดงการเปลี่ยนแปลงได้ครบ
