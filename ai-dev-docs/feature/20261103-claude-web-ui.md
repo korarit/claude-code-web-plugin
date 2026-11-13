@@ -1,5 +1,8 @@
 # 20261103 — Claude Web UI (Hybrid spawn, single-port FE+BE)
 
+> **Status:** Implemented (v1 — `claude -p --output-format stream-json`).  
+> **Architecture Update (2026-11-13):** แนวทาง runner และ session observation ถูกปรับต่อยอดไปยัง [20261113-interactive-tmux-jsonl-runner.md](./20261113-interactive-tmux-jsonl-runner.md) (`tmux` / PTY Interactive + เฝ้าอ่าน `.jsonl` transcript & Hooks) เพื่อลดความเสี่ยงด้าน ToS และรองรับการทำงานแบบ interactive เต็มรูปแบบ
+
 ## 1. Goal / Background
 
 - ต้องการ web UI แชทสั่งงานแทนการพิมพ์บน Claude CLI โดยตรง: พิมพ์ prompt บนเว็บ → backend spawn `claude -p --output-format stream-json` (reuse auth ของเครื่อง) → stream ผลกลับมาแบบ real-time
