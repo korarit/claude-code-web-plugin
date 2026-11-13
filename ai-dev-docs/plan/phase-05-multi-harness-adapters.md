@@ -1,6 +1,6 @@
 # Phase 5: Multi-Harness Adapters (`Claude CLI`, `Antigravity CLI`, `OpenCode`)
 
-> **Status:** 📋 Planned  
+> **Status:** ✅ Done  
 > **Parent Plan:** [roadmap.md](./roadmap.md)  
 > **Depends On:** [Phase 1](./phase-01-interactive-tmux-jsonl-hooks.md), [Phase 2](./phase-02-interactive-controls-and-discovery.md), [Phase 3](./phase-03-code-preview-and-file-changes.md)
 

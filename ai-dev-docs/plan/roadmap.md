@@ -16,8 +16,8 @@
 | **Phase 2** | [Interactive Controls, Session Discovery & Auth Modes](./phase-02-interactive-controls-and-discovery.md) | ✅ Done | [20261113-interactive-controls-and-discovery.md](../feature/20261113-interactive-controls-and-discovery.md) |
 | **Phase 3** | [Session Code Preview, File Changes & Diff Viewer](./phase-03-code-preview-and-file-changes.md) | ✅ Done | [20261113-code-preview-and-file-changes.md](../feature/20261113-code-preview-and-file-changes.md) |
 | **Phase 4** | [Multi-Agent Visibility & Worktree Dashboard](./phase-04-multi-agent-and-worktree-dashboard.md) | ✅ Done | [20261113-multi-agent-and-worktree-dashboard.md](../feature/20261113-multi-agent-and-worktree-dashboard.md) |
-| **Phase 5** | [Multi-Harness Adapters (`Claude CLI`, `Antigravity CLI`, `OpenCode`)](./phase-05-multi-harness-adapters.md) | 🚧 Next | — |
-| **Phase 6** | [Canonical Session Store & Full-Verbatim Cross-Harness Sync](./phase-06-canonical-session-and-sync.md) | 📋 Planned | — |
+| **Phase 5** | [Multi-Harness Adapters (`Claude CLI`, `Antigravity CLI`, `OpenCode`)](./phase-05-multi-harness-adapters.md) | ✅ Done | [20261113-multi-harness-adapters.md](../feature/20261113-multi-harness-adapters.md) |
+| **Phase 6** | [Canonical Session Store & Full-Verbatim Cross-Harness Sync](./phase-06-canonical-session-and-sync.md) | 🚧 Next | — |
 | **Phase 7** | [UI Polish (`shadcn/ui`), Boundary Enforcement & Packaging](./phase-07-ui-polish-boundaries-packaging.md) | 📋 Planned | [code-structure.md](../code-structure.md) |
 
 ---
