@@ -10,16 +10,67 @@ export type SessionOrigin = "web" | "cli" | "tmux" | "ide" | "opencode_server";
 
 export type SessionControlMode = "interactive" | "mirror";
 
+export type AuthMode = "machine_default" | "api_key";
+
+export type PermissionDecision = "allow_once" | "always_allow" | "deny";
+
+export interface InteractionOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface QuestionItem {
+  id: string;
+  header?: string;
+  prompt: string;
+  multiSelect: boolean;
+  options: InteractionOption[];
+  allowCustomText?: boolean;
+}
+
+export type PendingInteraction =
+  | {
+      id: string;
+      sessionId: string;
+      kind: "permission";
+      toolName: string;
+      commandOrTarget?: string;
+      message?: string;
+      options: { id: PermissionDecision; label: string }[];
+      createdAt: string;
+    }
+  | {
+      id: string;
+      sessionId: string;
+      kind: "question";
+      toolUseId?: string;
+      questions: QuestionItem[];
+      createdAt: string;
+    };
+
 export interface ChatSendRequest {
   prompt: string;
   sessionId?: string;
   model?: ModelId;
   cwd?: string;
+  authMode?: AuthMode;
+  agentProfile?: string;
 }
 
+export interface ResumeSessionRequest {
+  model?: ModelId;
+  authMode?: AuthMode;
+  agentProfile?: string;
+}
+
+export type ChatInputType = "decision" | "selection" | "text" | "key";
+
 export interface ChatInputRequest {
-  input?: string;
-  key?: string;
+  sessionId: string;
+  interactionId?: string;
+  inputType: ChatInputType;
+  value: string | string[] | Record<string, string | string[]>;
 }
 
 export interface SessionUpdateRequest {
@@ -35,6 +86,8 @@ export interface SessionInfo {
   status: SessionStatus;
   origin: SessionOrigin;
   controlMode: SessionControlMode;
+  authMode?: AuthMode;
+  agentProfile?: string;
   externalSessionId?: string;
   discoveredAt?: string;
   tmuxSession?: string;
@@ -42,6 +95,7 @@ export interface SessionInfo {
   cwd?: string;
   archivedAt?: string | null;
   lastMessagePreview?: string;
+  pendingInteraction?: PendingInteraction | null;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
@@ -56,7 +110,9 @@ export type ChatEventType =
   | "result"
   | "error"
   | "status"
-  | "permission_prompt";
+  | "permission_prompt"
+  | "interaction"
+  | "interaction_resolved";
 
 export interface PermissionPromptPayload {
   tool?: string;
@@ -87,6 +143,8 @@ export interface ChatStreamEvent {
   costUsd?: number;
   status?: SessionStatus;
   permissionPrompt?: PermissionPromptPayload;
+  interaction?: PendingInteraction;
+  interactionId?: string;
   message?: string;
   timestamp?: string;
 }
@@ -99,3 +157,36 @@ export interface SessionsListEvent {
   sessionId?: string;
   sessions?: SessionInfo[];
 }
+
+export interface WorkspaceFileEntry {
+  path: string;
+  name: string;
+  isDir: boolean;
+}
+
+export interface UploadImageResponse {
+  path: string;
+  filename: string;
+  size: number;
+}
+
+export interface ConcurrencyWarning {
+  activeCount: number;
+  limit: number;
+}
+
+export type TerminalServerMessage =
+  | {
+      type: "screen";
+      content: string;
+      tmuxSession: string;
+      timestamp: string;
+    }
+  | {
+      type: "error";
+      message: string;
+    };
+
+export type TerminalClientMessage =
+  | { type: "key"; key: string }
+  | { type: "text"; text: string };
