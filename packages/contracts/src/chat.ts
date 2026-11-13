@@ -1,6 +1,7 @@
 import type { AgentNode, TeamTaskItem } from "./agents.ts";
 import type { SessionFileChange } from "./changes.ts";
 import type { HarnessId } from "./harness.ts";
+import type { CanonicalSyncSummary, SyncStrategy, SyncedTurnsRange } from "./sync.ts";
 
 export type { HarnessId } from "./harness.ts";
 
@@ -101,6 +102,7 @@ export interface SessionInfo {
   archivedAt?: string | null;
   lastMessagePreview?: string;
   pendingInteraction?: PendingInteraction | null;
+  syncSummary?: CanonicalSyncSummary;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
@@ -120,7 +122,8 @@ export type ChatEventType =
   | "interaction_resolved"
   | "file_changed"
   | "agent_updated"
-  | "tasks_updated";
+  | "tasks_updated"
+  | "harness_switched";
 
 export interface PermissionPromptPayload {
   tool?: string;
@@ -159,6 +162,13 @@ export interface ChatStreamEvent {
   tasks?: TeamTaskItem[];
   agentId?: string;
   model?: string;
+  harnessId?: HarnessId;
+  switchedFrom?: HarnessId;
+  switchedTo?: HarnessId;
+  syncedTurnsRange?: SyncedTurnsRange;
+  syncStrategy?: SyncStrategy;
+  syncFilePath?: string;
+  canonicalSeq?: number;
   message?: string;
   timestamp?: string;
 }
