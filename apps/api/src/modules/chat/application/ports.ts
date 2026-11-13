@@ -4,7 +4,7 @@ import type {
   UploadImageResponse,
   WorkspaceFileEntry,
 } from "@contracts/chat";
-import type { DomainChatEvent, SessionListEvent } from "../domain/chat.events.ts";
+import type { DomainChatEvent, DomainHookEvent, SessionListEvent } from "../domain/chat.events.ts";
 
 export interface EnsureSessionOptions {
   sessionId: string;
@@ -64,6 +64,7 @@ export interface TranscriptWatcherPort {
     sessionId: string,
     transcriptPath: string,
     onEvent: (event: DomainChatEvent) => void,
+    options?: { fromBeginning?: boolean },
   ): Promise<void>;
   unwatch(sessionId: string): void;
   readRecentEvents(transcriptPath: string, limit?: number): Promise<DomainChatEvent[]>;
@@ -99,4 +100,10 @@ export interface FileChangeTrackerPort {
   onPreToolUse(input: FileChangeToolInput): Promise<void>;
   onPostToolUse(input: FileChangeToolInput): Promise<void>;
   deleteSession?(sessionId: string): Promise<void>;
+}
+
+export interface AgentTelemetryPort {
+  onHookEvent(sessionId: string, hook: DomainHookEvent, externalSessionId?: string): Promise<void>;
+  onTranscriptEvent(sessionId: string, event: DomainChatEvent): Promise<void>;
+  deleteSession?(sessionId: string): void;
 }

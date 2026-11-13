@@ -22,6 +22,7 @@ export function buildClaudeTranscriptPath(
 interface ContentBlock {
   type?: string;
   text?: string;
+  thinking?: string;
   name?: string;
   id?: string;
   input?: unknown;
@@ -227,7 +228,18 @@ export function parseClaudeTranscriptLine(raw: string): DomainChatEvent[] {
     const content = line.message?.content;
     if (Array.isArray(content)) {
       for (const block of content) {
-        if (block.type === "text" && block.text) {
+        if (block.type === "thinking" && block.thinking?.trim()) {
+          events.push({
+            id: line.uuid ? `${line.uuid}-thinking` : undefined,
+            type: "tool",
+            tool: "Thinking",
+            toolInput: { thinking: block.thinking },
+            model: line.message?.model,
+            text: truncate(block.thinking.trim(), 120),
+            parentToolUseId,
+            timestamp,
+          });
+        } else if (block.type === "text" && block.text) {
           events.push({
             id: line.uuid,
             type: "delta",
@@ -341,6 +353,7 @@ export class JsonlTranscriptWatcher implements TranscriptWatcherPort {
     sessionId: string,
     transcriptPath: string,
     onEvent: (event: DomainChatEvent) => void,
+    options?: { fromBeginning?: boolean },
   ): Promise<void> {
     const existing = this.watchers.get(sessionId);
     if (existing && existing.transcriptPath === transcriptPath) {
@@ -352,7 +365,7 @@ export class JsonlTranscriptWatcher implements TranscriptWatcherPort {
     }
 
     let initialOffset = 0;
-    if (existsSync(transcriptPath)) {
+    if (!options?.fromBeginning && existsSync(transcriptPath)) {
       try {
         initialOffset = statSync(transcriptPath).size;
       } catch {
@@ -371,6 +384,9 @@ export class JsonlTranscriptWatcher implements TranscriptWatcherPort {
     this.watchers.set(sessionId, state);
 
     this.attachWatchers(state);
+    if (options?.fromBeginning) {
+      await this.flushNewBytes(state);
+    }
     state.pollTimer = setInterval(() => {
       void this.flushNewBytes(state);
     }, 350);

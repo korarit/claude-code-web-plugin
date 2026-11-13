@@ -8,7 +8,12 @@ import {
   setPendingInteraction,
 } from "../domain/session.entity.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
-import type { EventBusPort, FileChangeTrackerPort, TranscriptWatcherPort } from "./ports.ts";
+import type {
+  AgentTelemetryPort,
+  EventBusPort,
+  FileChangeTrackerPort,
+  TranscriptWatcherPort,
+} from "./ports.ts";
 
 const TRACKED_EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
@@ -28,6 +33,7 @@ export async function watchTranscriptWithSync(
     eventBus: EventBusPort;
     coordinator?: InteractionCoordinator;
     fileChangeTracker?: FileChangeTrackerPort;
+    agentTelemetry?: AgentTelemetryPort;
     clock?: Clock;
   },
 ): Promise<void> {
@@ -37,6 +43,7 @@ export async function watchTranscriptWithSync(
     eventBus,
     coordinator,
     fileChangeTracker,
+    agentTelemetry,
     clock = systemClock,
   } = deps;
   const trackedTools = new Map<string, PendingTrackedTool>();
@@ -140,6 +147,10 @@ export async function watchTranscriptWithSync(
           editedAt: event.timestamp,
         });
       }
+    }
+
+    if (agentTelemetry) {
+      void agentTelemetry.onTranscriptEvent(sessionId, event).catch(() => {});
     }
 
     eventBus.publish(sessionId, event);

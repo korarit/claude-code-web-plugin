@@ -31,42 +31,7 @@ export class ListSessionChangesUsecase {
     const cwd = session.cwd || this.defaultCwd;
 
     if (mode === "git") {
-      const trackedByPath = new Map(
-        this.repo.listBySession(session.id).map((r) => [r.path, r]),
-      );
-      const gitFiles = await this.git.listChanges(cwd);
-      const now = isoNow(this.clock);
-
-      const files: SessionFileChange[] = gitFiles.map((gf) => {
-        const tracked = trackedByPath.get(gf.path);
-        return {
-          path: gf.path,
-          status: gf.status,
-          additions: gf.additions,
-          deletions: gf.deletions,
-          source: "git_workspace",
-          lastUpdatedAt: tracked?.lastUpdatedAt ?? now,
-          lastEditedBy: tracked?.lastEditedBy ?? {
-            harnessId: "git",
-            model: "workspace",
-          },
-          contributors: tracked?.contributors ?? [{ harnessId: "git", model: "workspace" }],
-          revisions: tracked ? toSessionFileChange(tracked).revisions : [],
-        };
-      });
-
-      const totalAdditions = files.reduce((sum, f) => sum + f.additions, 0);
-      const totalDeletions = files.reduce((sum, f) => sum + f.deletions, 0);
-
-      return ok({
-        mode: "git",
-        files,
-        summary: {
-          filesCount: files.length,
-          totalAdditions,
-          totalDeletions,
-        },
-      });
+      return ok(await this.listWorkspaceGitChanges(cwd, session.id));
     }
 
     const records = this.repo
@@ -85,5 +50,42 @@ export class ListSessionChangesUsecase {
         totalDeletions,
       },
     });
+  }
+
+  async listWorkspaceGitChanges(cwdInput?: string, sessionId?: string): Promise<SessionChangesResponse> {
+    const cwd = cwdInput?.trim() || this.defaultCwd;
+    const trackedByPath = sessionId
+      ? new Map(this.repo.listBySession(sessionId).map((r) => [r.path, r]))
+      : new Map();
+    const gitFiles = await this.git.listChanges(cwd);
+    const now = isoNow(this.clock);
+
+    const files: SessionFileChange[] = gitFiles.map((gf) => {
+      const tracked = trackedByPath.get(gf.path);
+      return {
+        path: gf.path,
+        status: gf.status,
+        additions: gf.additions,
+        deletions: gf.deletions,
+        source: "git_workspace",
+        lastUpdatedAt: tracked?.lastUpdatedAt ?? now,
+        lastEditedBy: tracked?.lastEditedBy ?? {
+          harnessId: "git",
+          model: "workspace",
+        },
+        contributors: tracked?.contributors ?? [{ harnessId: "git", model: "workspace" }],
+        revisions: tracked ? toSessionFileChange(tracked).revisions : [],
+      };
+    });
+
+    return {
+      mode: "git",
+      files,
+      summary: {
+        filesCount: files.length,
+        totalAdditions: files.reduce((sum, f) => sum + f.additions, 0),
+        totalDeletions: files.reduce((sum, f) => sum + f.deletions, 0),
+      },
+    };
   }
 }

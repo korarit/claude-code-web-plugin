@@ -1,8 +1,10 @@
 import type {
+  AgentNode,
   PendingInteraction,
   PermissionPromptPayload,
   SessionFileChange,
   SessionStatus,
+  TeamTaskItem,
 } from "@contracts/index";
 import type { Session } from "./session.entity.ts";
 
@@ -18,7 +20,9 @@ export type DomainChatEventType =
   | "permission_prompt"
   | "interaction"
   | "interaction_resolved"
-  | "file_changed";
+  | "file_changed"
+  | "agent_updated"
+  | "tasks_updated";
 
 export interface TokenUsage {
   inputTokens?: number;
@@ -42,6 +46,10 @@ export interface DomainChatEvent {
   interaction?: PendingInteraction;
   interactionId?: string;
   fileChange?: SessionFileChange;
+  agent?: AgentNode;
+  agents?: AgentNode[];
+  tasks?: TeamTaskItem[];
+  agentId?: string;
   model?: string;
   message?: string;
   timestamp?: string;
@@ -57,12 +65,20 @@ export interface DomainHookEvent {
   toolName?: string;
   toolUseId?: string;
   toolInput?: unknown;
+  agentId?: string;
+  agentType?: string;
+  agentTranscriptPath?: string;
+  teammateName?: string;
+  taskId?: string;
+  taskSubject?: string;
+  taskStatus?: string;
   message?: string;
   waitForDecision?: boolean;
 }
 
 export interface SessionListEvent {
-  type: "upsert" | "delete";
+  type: "upsert" | "delete" | "agent_updated";
   session?: Session;
   sessionId?: string;
+  agent?: AgentNode;
 }

@@ -30,6 +30,7 @@ import {
   SendMessageUsecase,
   UpdateSessionUsecase,
   UploadImageUsecase,
+  type AgentTelemetryPort,
   type EventBusPort,
   type FileChangeTrackerPort,
   type SendMessageRuntime,
@@ -53,6 +54,7 @@ function toListContract(event: SessionListEvent): SessionsListEvent {
     type: event.type,
     session: event.session ? toSessionInfo(event.session) : undefined,
     sessionId: event.sessionId,
+    agent: event.agent,
   };
 }
 
@@ -89,6 +91,7 @@ export interface ChatRoutesDeps {
   terminalAttach: TerminalAttachPort;
   workspace: WorkspacePort;
   fileChangeTracker?: FileChangeTrackerPort;
+  agentTelemetry?: AgentTelemetryPort;
 }
 
 export function chatRoutes(deps: ChatRoutesDeps) {
@@ -101,6 +104,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     terminalAttach,
     workspace,
     fileChangeTracker,
+    agentTelemetry,
   } = deps;
   const coordinator = deps.coordinator ?? new InteractionCoordinator();
 
@@ -113,6 +117,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     systemClock,
     coordinator,
     fileChangeTracker,
+    agentTelemetry,
   );
   const handleHook = new HandleHookUsecase(
     sessions,
@@ -123,6 +128,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     coordinator,
     runtime.permissionHookTimeoutMs ?? 55_000,
     fileChangeTracker,
+    agentTelemetry,
   );
   const sendInput = new SendInputUsecase(sessions, runner, eventBus, coordinator, systemClock);
   const resumeSession = new ResumeSessionUsecase(
@@ -134,6 +140,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     systemClock,
     coordinator,
     fileChangeTracker,
+    agentTelemetry,
   );
   const updateSession = new UpdateSessionUsecase(sessions, runner, watcher, eventBus);
   const abortSession = new AbortSessionUsecase(
@@ -150,6 +157,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     eventBus,
     coordinator,
     fileChangeTracker,
+    agentTelemetry,
   );
   const listWorkspaceFiles = new ListWorkspaceFilesUsecase(workspace, runtime.defaultCwd);
   const uploadImage = new UploadImageUsecase(workspace, runtime.defaultCwd);
@@ -562,22 +570,29 @@ export function chatRoutes(deps: ChatRoutesDeps) {
             ? payload["hookEventName"]
             : "";
 
+      const strField = (snake: string, camel?: string): string | undefined => {
+        const v = payload[snake] ?? (camel ? payload[camel] : undefined);
+        return typeof v === "string" && v.trim() ? v.trim() : undefined;
+      };
+
       const result = await handleHook.execute({
         sessionId: headerSessionId,
-        externalSessionId:
-          typeof payload["session_id"] === "string" ? payload["session_id"] : undefined,
-        tmuxSession:
-          typeof payload["tmux_session"] === "string"
-            ? payload["tmux_session"]
-            : headerTmuxSession,
-        transcriptPath:
-          typeof payload["transcript_path"] === "string" ? payload["transcript_path"] : undefined,
-        cwd: typeof payload["cwd"] === "string" ? payload["cwd"] : undefined,
+        externalSessionId: strField("session_id", "sessionId"),
+        tmuxSession: strField("tmux_session", "tmuxSession") ?? headerTmuxSession,
+        transcriptPath: strField("transcript_path", "transcriptPath"),
+        cwd: strField("cwd"),
         hookEventName,
-        toolName: typeof payload["tool_name"] === "string" ? payload["tool_name"] : undefined,
-        toolUseId: typeof payload["tool_use_id"] === "string" ? payload["tool_use_id"] : undefined,
-        toolInput: payload["tool_input"],
-        message: typeof payload["message"] === "string" ? payload["message"] : undefined,
+        toolName: strField("tool_name", "toolName"),
+        toolUseId: strField("tool_use_id", "toolUseId"),
+        toolInput: payload["tool_input"] ?? payload["toolInput"],
+        agentId: strField("agent_id", "agentId"),
+        agentType: strField("agent_type", "agentType"),
+        agentTranscriptPath: strField("agent_transcript_path", "agentTranscriptPath"),
+        teammateName: strField("teammate_name", "teammateName"),
+        taskId: strField("task_id", "taskId"),
+        taskSubject: strField("task_subject", "taskSubject"),
+        taskStatus: strField("task_status", "taskStatus"),
+        message: strField("message"),
         waitForDecision,
       });
       if (!result.ok) throw result.error;

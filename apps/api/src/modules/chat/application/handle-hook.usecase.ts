@@ -17,6 +17,7 @@ import type { DomainHookEvent } from "../domain/chat.events.ts";
 import type { SessionRepository } from "../domain/repository.port.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
 import type {
+  AgentTelemetryPort,
   EventBusPort,
   FileChangeTrackerPort,
   TerminalRunnerPort,
@@ -48,6 +49,7 @@ export class HandleHookUsecase {
     private readonly coordinator?: InteractionCoordinator,
     private readonly permissionTimeoutMs = 55_000,
     private readonly fileChangeTracker?: FileChangeTrackerPort,
+    private readonly agentTelemetry?: AgentTelemetryPort,
   ) {}
 
   async execute(hook: DomainHookEvent): Promise<Result<HandleHookOutput, AppError>> {
@@ -73,6 +75,7 @@ export class HandleHookUsecase {
         eventBus: this.eventBus,
         coordinator: this.coordinator,
         fileChangeTracker: this.fileChangeTracker,
+        agentTelemetry: this.agentTelemetry,
         clock: this.clock,
       });
     }
@@ -105,6 +108,7 @@ export class HandleHookUsecase {
               toolName: hook.toolName,
               toolUseId: hook.toolUseId,
               toolInput: hook.toolInput,
+              agentId: hook.agentId,
             })
             .catch(() => {});
         }
@@ -125,6 +129,7 @@ export class HandleHookUsecase {
               toolName: hook.toolName,
               toolUseId: hook.toolUseId,
               toolInput: hook.toolInput,
+              agentId: hook.agentId,
               editedAt: timestamp,
             })
             .catch(() => {});
@@ -195,6 +200,13 @@ export class HandleHookUsecase {
         });
 
         if (this.coordinator && hook.waitForDecision) {
+          this.sessions.save(next);
+          this.eventBus.publishListEvent({ type: "upsert", session: next });
+          if (this.agentTelemetry) {
+            await this.agentTelemetry
+              .onHookEvent(next.id, hook, next.externalSessionId)
+              .catch(() => {});
+          }
           const decision = await this.coordinator.waitForPermissionDecision(
             next.id,
             interaction,
@@ -216,6 +228,15 @@ export class HandleHookUsecase {
               status: "running",
               timestamp: isoNow(this.clock),
             });
+            if (this.agentTelemetry) {
+              await this.agentTelemetry
+                .onHookEvent(
+                  resumed.id,
+                  { ...hook, hookEventName: "PermissionResolved" },
+                  resumed.externalSessionId,
+                )
+                .catch(() => {});
+            }
             return ok({ matched: true, session: resumed, decision });
           }
           return ok({ matched: true, session: latest, decision: "timeout" });
@@ -290,6 +311,12 @@ export class HandleHookUsecase {
 
     this.sessions.save(next);
     this.eventBus.publishListEvent({ type: "upsert", session: next });
+
+    if (this.agentTelemetry) {
+      await this.agentTelemetry
+        .onHookEvent(next.id, hook, next.externalSessionId)
+        .catch(() => {});
+    }
 
     return ok({ matched: true, session: next });
   }

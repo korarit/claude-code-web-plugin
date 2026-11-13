@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { extname, join } from "node:path";
-import { systemClock } from "@core/time";
+import { isoNow, systemClock } from "@core/time";
 import { parseEnv, type Env } from "./env.ts";
 import { errorPlugin } from "./plugins.ts";
 import { chatRoutes } from "./modules/chat/presentation/chat.routes.ts";
@@ -11,6 +11,7 @@ import {
   DiscoverSessionUsecase,
   InteractionCoordinator,
   watchTranscriptWithSync,
+  type AgentTelemetryPort,
   type EventBusPort,
   type FileChangeTrackerPort,
   type TerminalAttachPort,
@@ -35,6 +36,19 @@ import { LocalGitWorkspaceAdapter } from "./modules/changes/infrastructure/git-w
 import { LocalWorkspaceFilesAdapter } from "./modules/changes/infrastructure/local-workspace-files.adapter.ts";
 import { FileSnapshotStore } from "./modules/changes/infrastructure/snapshot.store.ts";
 import { changesRoutes } from "./modules/changes/presentation/changes.routes.ts";
+import {
+  SyncAgentTelemetryUsecase,
+  toAgentNodeContract,
+  toTeamTaskContract,
+  type AgentTranscriptWatcherPort,
+  type SessionAgentLookupPort,
+} from "./modules/agents/application/index.ts";
+import { InMemoryAgentEventBus } from "./modules/agents/infrastructure/agent-event-bus.ts";
+import { FileAgentsRepository } from "./modules/agents/infrastructure/agents.repository.ts";
+import { ClaudeTeamTasksWatcher } from "./modules/agents/infrastructure/team-tasks.watcher.ts";
+import { agentsRoutes } from "./modules/agents/presentation/agents.routes.ts";
+import { LocalGitWorktreeAdapter } from "./modules/workspace/infrastructure/git-worktree.adapter.ts";
+import { workspaceRoutes } from "./modules/workspace/presentation/workspace.routes.ts";
 
 const WEB_DIST = join(import.meta.dir, "../../web/dist");
 
@@ -129,6 +143,88 @@ export function createApp(options: CreateAppOptions = {}) {
     },
   };
 
+  const agentsRepo = new FileAgentsRepository(join(env.harnessHome, "agents"));
+  const teamTasksWatcher = new ClaudeTeamTasksWatcher(env.claudeHome);
+  const agentSessionLookup: SessionAgentLookupPort = {
+    getSession: (id) => {
+      const s = sessions.get(id);
+      if (!s) return null;
+      return {
+        id: s.id,
+        title: s.title,
+        model: s.model,
+        status: s.status,
+        harnessId: s.harnessId,
+        externalSessionId: s.externalSessionId,
+        transcriptPath: s.transcriptPath,
+        cwd: s.cwd,
+        updatedAt: s.updatedAt,
+      };
+    },
+    listSessionIds: () => sessions.list({ archived: "all" }).map((s) => s.id),
+  };
+  const agentTranscriptWatcher: AgentTranscriptWatcherPort = {
+    watchFromStart: (watchKey, transcriptPath, onEvent) =>
+      watcher.watch(watchKey, transcriptPath, (ev) => onEvent(ev), { fromBeginning: true }),
+    unwatch: (watchKey) => watcher.unwatch(watchKey),
+    readRecentEvents: (transcriptPath, limit) => watcher.readRecentEvents(transcriptPath, limit),
+  };
+  const agentEventBus = new InMemoryAgentEventBus({
+    publishAgentUpdated: (sessionId, agent) => {
+      const contract = toAgentNodeContract(agent);
+      eventBus.publish(sessionId, {
+        type: "agent_updated",
+        agentId: agent.agentId,
+        agent: contract,
+        timestamp: agent.updatedAt,
+      });
+      eventBus.publishListEvent({
+        type: "agent_updated",
+        sessionId,
+        agent: contract,
+      });
+    },
+    publishTasksUpdated: (sessionId, tasks) => {
+      eventBus.publish(sessionId, {
+        type: "tasks_updated",
+        tasks: tasks.map(toTeamTaskContract),
+        timestamp: isoNow(systemClock),
+      });
+    },
+  });
+  const syncAgents = new SyncAgentTelemetryUsecase(
+    agentsRepo,
+    agentSessionLookup,
+    agentTranscriptWatcher,
+    teamTasksWatcher,
+    agentEventBus,
+    systemClock,
+    fileChangeTracker,
+  );
+  const agentTelemetry: AgentTelemetryPort = {
+    onHookEvent: (sessionId, hook, externalSessionId) =>
+      syncAgents.onHookEvent({
+        sessionId,
+        externalSessionId,
+        cwd: hook.cwd,
+        hookEventName: hook.hookEventName,
+        toolName: hook.toolName,
+        toolUseId: hook.toolUseId,
+        toolInput: hook.toolInput,
+        agentId: hook.agentId,
+        agentType: hook.agentType,
+        agentTranscriptPath: hook.agentTranscriptPath,
+        teammateName: hook.teammateName,
+        taskId: hook.taskId,
+        taskSubject: hook.taskSubject,
+        taskStatus: hook.taskStatus,
+      }),
+    onTranscriptEvent: (sessionId, event) => syncAgents.onMainTranscriptEvent(sessionId, event),
+    deleteSession: (sessionId) => syncAgents.deleteSession(sessionId),
+  };
+
+  const gitWorktree = new LocalGitWorktreeAdapter();
+
   const discoverUsecase = new DiscoverSessionUsecase(
     sessions,
     watcher,
@@ -136,6 +232,7 @@ export function createApp(options: CreateAppOptions = {}) {
     systemClock,
     coordinator,
     fileChangeTracker,
+    agentTelemetry,
   );
   const discovery = new SessionDiscoveryService({
     claudeHome: env.claudeHome,
@@ -155,6 +252,7 @@ export function createApp(options: CreateAppOptions = {}) {
         terminalAttach,
         workspace,
         fileChangeTracker,
+        agentTelemetry,
         runtime: {
           port: env.port,
           token: env.token,
@@ -175,6 +273,21 @@ export function createApp(options: CreateAppOptions = {}) {
         defaultCwd,
       }),
     )
+    .use(
+      agentsRoutes({
+        sessions: agentSessionLookup,
+        repo: agentsRepo,
+        watcher: agentTranscriptWatcher,
+        publisher: agentEventBus,
+        syncUsecase: syncAgents,
+      }),
+    )
+    .use(
+      workspaceRoutes({
+        git: gitWorktree,
+        defaultCwd,
+      }),
+    )
     .get("/api/*", () => new Response(JSON.stringify({ ok: false }), { status: 404 }))
     .get("/*", async ({ path }) => (await serveStatic(path)) ?? serveIndex());
 
@@ -189,6 +302,9 @@ export function createApp(options: CreateAppOptions = {}) {
     discovery,
     fileChangeTracker,
     changesRepo,
+    agentsRepo,
+    agentTelemetry,
+    syncAgents,
   };
 }
 
@@ -199,6 +315,7 @@ export async function reconcilePersistedSessions(
   eventBus: EventBusPort,
   coordinator?: InteractionCoordinator,
   fileChangeTracker?: FileChangeTrackerPort,
+  agentTelemetry?: AgentTelemetryPort,
 ): Promise<void> {
   const active = await runner.listActiveSessions().catch(() => []);
   const activeNames = new Set(active.map((a) => a.name));
@@ -221,6 +338,7 @@ export async function reconcilePersistedSessions(
         eventBus,
         coordinator,
         fileChangeTracker,
+        agentTelemetry,
       });
     }
   }
@@ -254,6 +372,7 @@ if (import.meta.main) {
     coordinator,
     discovery,
     fileChangeTracker,
+    agentTelemetry,
   } = createApp();
   await reconcilePersistedSessions(
     sessions,
@@ -262,6 +381,7 @@ if (import.meta.main) {
     eventBus,
     coordinator,
     fileChangeTracker,
+    agentTelemetry,
   );
   discovery.start();
 

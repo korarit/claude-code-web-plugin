@@ -23,6 +23,17 @@ export class ReadRawFileUsecase {
     if (!rawPath) return err(new ChangeBadRequestError("path query parameter is required"));
 
     const cwd = session.cwd || this.defaultCwd;
+    return this.readWorkspaceRawFile(cwd, rawPath);
+  }
+
+  async readWorkspaceRawFile(
+    cwdInput: string | undefined,
+    rawPathInput: string,
+  ): Promise<Result<RawFileResponse, AppError>> {
+    const rawPath = rawPathInput?.trim();
+    if (!rawPath) return err(new ChangeBadRequestError("path query parameter is required"));
+
+    const cwd = cwdInput?.trim() || this.defaultCwd;
     let resolved;
     try {
       resolved = await this.files.resolveSafePath(cwd, rawPath);

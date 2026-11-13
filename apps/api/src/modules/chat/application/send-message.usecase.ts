@@ -22,6 +22,7 @@ import {
 import type { SessionRepository } from "../domain/repository.port.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
 import type {
+  AgentTelemetryPort,
   EventBusPort,
   FileChangeTrackerPort,
   TerminalRunnerPort,
@@ -68,6 +69,7 @@ export class SendMessageUsecase {
     private readonly clock: Clock = systemClock,
     private readonly coordinator?: InteractionCoordinator,
     private readonly fileChangeTracker?: FileChangeTrackerPort,
+    private readonly agentTelemetry?: AgentTelemetryPort,
   ) {}
 
   async execute(input: SendMessageInput): Promise<Result<SendMessageOutput, AppError>> {
@@ -165,6 +167,7 @@ export class SendMessageUsecase {
       eventBus: this.eventBus,
       coordinator: this.coordinator,
       fileChangeTracker: this.fileChangeTracker,
+      agentTelemetry: this.agentTelemetry,
       clock: this.clock,
     });
 

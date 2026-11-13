@@ -48,6 +48,25 @@ export function changesRoutes(deps: ChangesRoutesDeps) {
   );
 
   return new Elysia()
+    .get("/api/workspace/changes", async ({ query }) => {
+      return okResponse(await listChanges.listWorkspaceGitChanges(query["cwd"] || undefined));
+    })
+    .get("/api/workspace/changes/diff", async ({ query }) => {
+      const result = await getFileDiff.getWorkspaceGitDiff(
+        query["cwd"] || undefined,
+        query["path"] ?? "",
+      );
+      if (!result.ok) throw result.error;
+      return okResponse(result.value);
+    })
+    .get("/api/workspace/files/raw", async ({ query }) => {
+      const result = await readRawFile.readWorkspaceRawFile(
+        query["cwd"] || undefined,
+        query["path"] ?? "",
+      );
+      if (!result.ok) throw result.error;
+      return okResponse(result.value);
+    })
     .get("/api/chat/sessions/:id/changes", async ({ params, query }) => {
       const mode: FileDiffMode = query["mode"] === "git" ? "git" : "session";
       const result = await listChanges.execute({

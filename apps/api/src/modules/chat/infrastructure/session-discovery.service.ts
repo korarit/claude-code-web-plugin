@@ -121,7 +121,13 @@ export class SessionDiscoveryService {
           const projPath = join(projectsDir, dirEntry.name);
           try {
             for (const fileEntry of readdirSync(projPath, { withFileTypes: true })) {
-              if (!fileEntry.isFile() || !fileEntry.name.endsWith(".jsonl")) continue;
+              if (
+                !fileEntry.isFile() ||
+                !fileEntry.name.endsWith(".jsonl") ||
+                fileEntry.name.startsWith("agent-")
+              ) {
+                continue;
+              }
               const fullPath = join(projPath, fileEntry.name);
               try {
                 const st = statSync(fullPath);

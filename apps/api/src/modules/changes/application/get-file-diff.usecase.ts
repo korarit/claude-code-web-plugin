@@ -52,32 +52,7 @@ export class GetFileDiffUsecase {
     const mode: FileDiffMode = input.mode === "git" ? "git" : "session";
 
     if (mode === "git") {
-      const [headBytes, currentBytes] = await Promise.all([
-        this.git.readHeadFile(cwd, resolved.relPath),
-        this.files.readFileBytes(resolved.absPath),
-      ]);
-
-      if (headBytes === null && currentBytes === null) {
-        return err(new ChangeNotFoundError(`File not found in git or workspace: ${resolved.relPath}`));
-      }
-
-      const orig = decodePreviewText(headBytes);
-      const mod = decodePreviewText(currentBytes);
-      const isBinary = orig.isBinary || mod.isBinary;
-      const truncated = orig.truncated || mod.truncated;
-      const status: FileChangeStatus =
-        headBytes === null ? "added" : currentBytes === null ? "deleted" : "modified";
-
-      return ok({
-        path: resolved.relPath,
-        status,
-        mode: "git",
-        originalText: isBinary ? null : orig.text,
-        modifiedText: isBinary ? null : mod.text,
-        unifiedDiff: isBinary ? "" : buildUnifiedDiff(resolved.relPath, orig.text, mod.text),
-        isBinary,
-        truncated,
-      });
+      return this.getWorkspaceGitDiff(cwd, rawPath);
     }
 
     const record = this.repo.get(session.id, resolved.relPath);
@@ -140,6 +115,49 @@ export class GetFileDiffUsecase {
       mode: "session",
       revId: input.revId,
       editedBy,
+      originalText: isBinary ? null : orig.text,
+      modifiedText: isBinary ? null : mod.text,
+      unifiedDiff: isBinary ? "" : buildUnifiedDiff(resolved.relPath, orig.text, mod.text),
+      isBinary,
+      truncated,
+    });
+  }
+
+  async getWorkspaceGitDiff(
+    cwdInput: string | undefined,
+    rawPath: string,
+  ): Promise<Result<FileDiffResponse, AppError>> {
+    const trimmedPath = rawPath?.trim();
+    if (!trimmedPath) return err(new ChangeBadRequestError("path query parameter is required"));
+
+    const cwd = cwdInput?.trim() || this.defaultCwd;
+    let resolved;
+    try {
+      resolved = await this.files.resolveSafePath(cwd, trimmedPath);
+    } catch (e) {
+      return err(e as AppError);
+    }
+
+    const [headBytes, currentBytes] = await Promise.all([
+      this.git.readHeadFile(cwd, resolved.relPath),
+      this.files.readFileBytes(resolved.absPath),
+    ]);
+
+    if (headBytes === null && currentBytes === null) {
+      return err(new ChangeNotFoundError(`File not found in git or workspace: ${resolved.relPath}`));
+    }
+
+    const orig = decodePreviewText(headBytes);
+    const mod = decodePreviewText(currentBytes);
+    const isBinary = orig.isBinary || mod.isBinary;
+    const truncated = orig.truncated || mod.truncated;
+    const status: FileChangeStatus =
+      headBytes === null ? "added" : currentBytes === null ? "deleted" : "modified";
+
+    return ok({
+      path: resolved.relPath,
+      status,
+      mode: "git",
       originalText: isBinary ? null : orig.text,
       modifiedText: isBinary ? null : mod.text,
       unifiedDiff: isBinary ? "" : buildUnifiedDiff(resolved.relPath, orig.text, mod.text),
