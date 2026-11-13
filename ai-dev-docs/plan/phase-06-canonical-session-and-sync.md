@@ -1,8 +1,8 @@
-# Phase 5: Canonical Session Store & Full-Verbatim Cross-Harness Sync
+# Phase 6: Canonical Session Store & Full-Verbatim Cross-Harness Sync
 
 > **Status:** 📋 Planned  
 > **Parent Plan:** [roadmap.md](./roadmap.md)  
-> **Depends On:** [Phase 4](./phase-04-multi-harness-adapters.md)
+> **Depends On:** [Phase 5](./phase-05-multi-harness-adapters.md)
 
 ## 1. Objective
 

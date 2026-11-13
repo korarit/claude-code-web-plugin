@@ -1,8 +1,8 @@
-# Phase 6: UI Polish (`shadcn/ui`), Boundary Enforcement & Packaging
+# Phase 7: UI Polish (`shadcn/ui`), Boundary Enforcement & Packaging
 
 > **Status:** 📋 Planned  
 > **Parent Plan:** [roadmap.md](./roadmap.md)  
-> **Depends On:** [Phase 1](./phase-01-interactive-tmux-jsonl-hooks.md) – [Phase 5](./phase-05-canonical-session-and-sync.md)  
+> **Depends On:** [Phase 1](./phase-01-interactive-tmux-jsonl-hooks.md) – [Phase 6](./phase-06-canonical-session-and-sync.md)  
 > **Architecture Spec:** [code-structure.md](../code-structure.md)
 
 ## 1. Objective
@@ -13,7 +13,7 @@
 
 ### 2.1 UI Component System (`apps/web`)
 - ติดตั้งและตั้งค่า **shadcn/ui** (`components.json`, `src/lib/utils.ts` `cn()`, `src/components/ui/*`) ตาม [code-structure.md](../code-structure.md)
-- Refactor components ใน `features/chat` (Dialogs, Command Palette `Cmd+K` สำหรับสลับ session/model/harness, Tabs, Badges, Resizable Split Panels สำหรับ Chat + Terminal/Diff)
+- Refactor components ใน `features/chat` (Dialogs, Command Palette `Cmd+K` สำหรับสลับ session/model/harness, Tabs, Badges, Resizable Split Panels สำหรับ Chat + Changes Diff + Terminal)
 - ปรับปรุง accessibility, keyboard shortcuts, และ responsive layout
 
 ### 2.2 Automated Boundary & Code Quality Guardrails
