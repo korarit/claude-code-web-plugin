@@ -14,6 +14,7 @@ import type { SessionRepository } from "../domain/repository.port.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
 import type {
   AgentTelemetryPort,
+  CanonicalSyncPort,
   EventBusPort,
   FileChangeTrackerPort,
   HarnessGatewayPort,
@@ -47,6 +48,7 @@ export class ResumeSessionUsecase {
     private readonly fileChangeTracker?: FileChangeTrackerPort,
     private readonly agentTelemetry?: AgentTelemetryPort,
     private readonly harnessGateway?: HarnessGatewayPort,
+    private readonly canonicalSync?: CanonicalSyncPort,
   ) {}
 
   async execute(input: ResumeSessionInput): Promise<Result<ResumeSessionOutput, AppError>> {
@@ -119,6 +121,9 @@ export class ResumeSessionUsecase {
     }
 
     this.sessions.save(updated);
+    if (this.canonicalSync) {
+      await this.canonicalSync.ingestExternalSession(updated).catch(() => {});
+    }
     this.eventBus.publishListEvent({ type: "upsert", session: updated });
     this.eventBus.publish(updated.id, {
       type: "status",
@@ -135,6 +140,7 @@ export class ResumeSessionUsecase {
         coordinator: this.coordinator,
         fileChangeTracker: this.fileChangeTracker,
         agentTelemetry: this.agentTelemetry,
+        canonicalSync: this.canonicalSync,
         clock: this.clock,
       });
     } else if (updated.transcriptPath) {
@@ -145,6 +151,7 @@ export class ResumeSessionUsecase {
         coordinator: this.coordinator,
         fileChangeTracker: this.fileChangeTracker,
         agentTelemetry: this.agentTelemetry,
+        canonicalSync: this.canonicalSync,
         clock: this.clock,
       });
     }

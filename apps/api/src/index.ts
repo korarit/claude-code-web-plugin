@@ -13,6 +13,7 @@ import {
   observeHarnessSessionWithSync,
   watchTranscriptWithSync,
   type AgentTelemetryPort,
+  type CanonicalSyncPort,
   type EventBusPort,
   type FileChangeTrackerPort,
   type HarnessGatewayPort,
@@ -21,6 +22,7 @@ import {
   type TranscriptWatcherPort,
   type WorkspacePort,
 } from "./modules/chat/application/index.ts";
+import type { DomainChatEvent } from "./modules/chat/domain/chat.events.ts";
 import { InMemoryEventBus } from "./modules/chat/infrastructure/event-bus.ts";
 import { JsonlTranscriptWatcher } from "./modules/chat/infrastructure/jsonl-watcher.ts";
 import { FileSessionRepository } from "./modules/chat/infrastructure/session.repository.ts";
@@ -56,6 +58,21 @@ import { AntigravityHarnessAdapter } from "./modules/harness/infrastructure/agy-
 import { ClaudeHarnessAdapter } from "./modules/harness/infrastructure/claude-harness.adapter.ts";
 import { OpenCodeHarnessAdapter } from "./modules/harness/infrastructure/opencode-harness.adapter.ts";
 import { harnessRoutes } from "./modules/harness/presentation/harness.routes.ts";
+import {
+  CanonicalSyncService,
+  ExternalSessionIngestService,
+  SwitchHarnessUsecase,
+  type OpenCodeNativeImporterPort,
+  type SyncEventPublisherPort,
+  type SyncHarnessGatewayPort,
+  type SyncSessionBridgePort,
+} from "./modules/sync/application/index.ts";
+import { DEFAULT_SYNC_THRESHOLDS } from "./modules/sync/domain/canonical-session.entity.ts";
+import type { CanonicalSessionRepository } from "./modules/sync/domain/canonical-session.repository.port.ts";
+import { OpenCodeNativeImporterAdapter } from "./modules/sync/infrastructure/opencode-native-importer.adapter.ts";
+import { SqliteCanonicalSessionRepository } from "./modules/sync/infrastructure/sqlite-canonical-session.repository.ts";
+import { LocalSyncFileWriterAdapter } from "./modules/sync/infrastructure/sync-file-writer.adapter.ts";
+import { syncRoutes } from "./modules/sync/presentation/sync.routes.ts";
 
 const WEB_DIST = join(import.meta.dir, "../../web/dist");
 
@@ -102,6 +119,8 @@ export interface CreateAppOptions {
   terminalAttach?: TerminalAttachPort;
   workspace?: WorkspacePort;
   harnessRegistry?: HarnessRegistry;
+  canonicalRepo?: CanonicalSessionRepository;
+  opencodeImporter?: OpenCodeNativeImporterPort;
   defaultCwd?: string;
 }
 
@@ -174,6 +193,16 @@ export function createApp(options: CreateAppOptions = {}) {
       }),
     ]);
 
+  const activeObservers = new Map<string, () => void>();
+  const unwatchObserver = (sessionId: string) => {
+    const prev = activeObservers.get(sessionId);
+    if (prev) {
+      prev();
+      activeObservers.delete(sessionId);
+    }
+    watcher.unwatch(sessionId);
+  };
+
   const harnessGateway: HarnessGatewayPort = {
     getDefaultModel: (harnessId) => harnessRegistry.get(harnessId).getDefaultModel(),
     isAvailable: (harnessId) => harnessRegistry.get(harnessId).detectAvailability(),
@@ -216,6 +245,7 @@ export function createApp(options: CreateAppOptions = {}) {
         cwd: session.cwd,
       }),
     stopSession: async (session) => {
+      unwatchObserver(session.id);
       const adapter = harnessRegistry.get(session.harnessId);
       await adapter.stopSession?.({
         sessionId: session.id,
@@ -224,8 +254,9 @@ export function createApp(options: CreateAppOptions = {}) {
         cwd: session.cwd,
       });
     },
-    observeEvents: (session, onEvent, opts) =>
-      harnessRegistry.get(session.harnessId).observeEvents(
+    observeEvents: async (session, onEvent, opts) => {
+      unwatchObserver(session.id);
+      const stop = await harnessRegistry.get(session.harnessId).observeEvents(
         {
           sessionId: session.id,
           externalSessionId: session.externalSessionId,
@@ -236,7 +267,15 @@ export function createApp(options: CreateAppOptions = {}) {
         },
         onEvent,
         opts,
-      ),
+      );
+      activeObservers.set(session.id, stop);
+      return () => {
+        stop();
+        if (activeObservers.get(session.id) === stop) {
+          activeObservers.delete(session.id);
+        }
+      };
+    },
     readRecentEvents: async (session, limit) => {
       const adapter = harnessRegistry.get(session.harnessId);
       if (!adapter.readRecentEvents) return [];
@@ -255,6 +294,243 @@ export function createApp(options: CreateAppOptions = {}) {
     discoverSessions: () => harnessRegistry.discoverAll(),
     watchExternalSessions: (onUpsert) => harnessRegistry.watchAll(onUpsert),
   };
+
+  const canonicalRepo =
+    options.canonicalRepo ??
+    new SqliteCanonicalSessionRepository(join(env.harnessHome, "canonical-sessions.db"));
+  const syncFileWriter = new LocalSyncFileWriterAdapter();
+  const opencodeImporter =
+    options.opencodeImporter ??
+    new OpenCodeNativeImporterAdapter({ enabled: Boolean(env.opencodeNativeImport) });
+  const canonicalSyncService = new CanonicalSyncService(
+    canonicalRepo,
+    syncFileWriter,
+    systemClock,
+    {
+      byteThreshold: env.syncByteThreshold ?? DEFAULT_SYNC_THRESHOLDS.byteThreshold,
+      turnThreshold: env.syncTurnThreshold ?? DEFAULT_SYNC_THRESHOLDS.turnThreshold,
+      contextRatioLimit: DEFAULT_SYNC_THRESHOLDS.contextRatioLimit,
+    },
+    opencodeImporter,
+  );
+  const syncHarnessPort: SyncHarnessGatewayPort = {
+    isAvailable: (harnessId) => harnessGateway.isAvailable(harnessId),
+    getDefaultModel: (harnessId) => harnessGateway.getDefaultModel(harnessId),
+    readRecentEvents: (session, limit) =>
+      harnessGateway.readRecentEvents(
+        {
+          id: session.id,
+          harnessId: session.harnessId,
+          externalSessionId: session.externalSessionId,
+          tmuxSession: session.tmuxSession,
+          transcriptPath: session.transcriptPath,
+          cwd: session.cwd,
+          model: session.model,
+        },
+        limit,
+      ),
+  };
+  const externalIngest = new ExternalSessionIngestService(canonicalSyncService, syncHarnessPort);
+
+  const canonicalSync: CanonicalSyncPort = {
+    ensureSession: (session) => {
+      canonicalSyncService.ensureSession({
+        sessionId: session.id,
+        harnessId: session.harnessId,
+        origin: session.origin,
+        controlMode: session.controlMode,
+        cwd: session.cwd,
+        title: session.title,
+        model: session.model,
+        externalSessionId: session.externalSessionId,
+        tmuxSession: session.tmuxSession,
+        transcriptPath: session.transcriptPath,
+      });
+    },
+    ingestEvent: (session, event) => {
+      const res = canonicalSyncService.ingestObservedEvent(
+        {
+          sessionId: session.id,
+          harnessId: session.harnessId,
+          origin: session.origin,
+          controlMode: session.controlMode,
+          cwd: session.cwd,
+          title: session.title,
+          model: session.model,
+          externalSessionId: session.externalSessionId,
+          tmuxSession: session.tmuxSession,
+          transcriptPath: session.transcriptPath,
+        },
+        event,
+      );
+      return {
+        inserted: res.inserted,
+        cleanUserText: res.cleanUserText,
+        canonicalSeq: res.event?.seq,
+      };
+    },
+    ingestExternalSession: async (session, preloadedEvents) => {
+      await externalIngest.ingestSession(session, preloadedEvents);
+    },
+    preparePromptForSend: (session, prompt, model) =>
+      canonicalSyncService.preparePromptForSend({
+        session: {
+          sessionId: session.id,
+          harnessId: session.harnessId,
+          origin: session.origin,
+          controlMode: session.controlMode,
+          cwd: session.cwd,
+          title: session.title,
+          model,
+          externalSessionId: session.externalSessionId,
+          tmuxSession: session.tmuxSession,
+          transcriptPath: session.transcriptPath,
+        },
+        prompt,
+        model,
+      }),
+    commitPromptSent: (params) => canonicalSyncService.commitPromptSent(params),
+    updateBinding: (sessionId, harnessId, meta) => {
+      canonicalSyncService.updateBinding(sessionId, harnessId, meta);
+    },
+    getSyncSummary: (sessionId, targetModel) =>
+      canonicalSyncService.getSyncSummary(sessionId, targetModel),
+    getCanonicalReplayEvents: (sessionId, limit) => {
+      const history = canonicalSyncService.getCanonicalHistory(sessionId, limit);
+      if (!history) return [];
+      const replay: DomainChatEvent[] = [];
+      for (const e of history.events) {
+        if (e.kind === "message" && e.role === "user") {
+          replay.push({
+            id: e.id,
+            type: "user",
+            role: "user",
+            text: e.text,
+            harnessId: e.harnessId,
+            model: e.model,
+            syncedTurnsRange: e.syncedTurnsRange,
+            syncStrategy: e.syncStrategy,
+            canonicalSeq: e.seq,
+            timestamp: e.ts,
+          });
+        } else if (e.kind === "message" && e.role === "assistant") {
+          replay.push({
+            id: e.id,
+            type: "delta",
+            role: "assistant",
+            text: e.text,
+            harnessId: e.harnessId,
+            model: e.model,
+            canonicalSeq: e.seq,
+            timestamp: e.ts,
+          });
+        } else if (e.kind === "tool_call") {
+          replay.push({
+            id: e.id,
+            type: "tool",
+            role: "assistant",
+            tool: e.toolName,
+            toolUseId: e.toolUseId,
+            toolInput: e.toolInput,
+            text: e.text,
+            harnessId: e.harnessId,
+            model: e.model,
+            canonicalSeq: e.seq,
+            timestamp: e.ts,
+          });
+        } else if (e.kind === "tool_result") {
+          replay.push({
+            id: e.id,
+            type: "tool",
+            role: "assistant",
+            tool: "tool_result",
+            toolUseId: e.toolUseId,
+            text: e.toolOutput ?? e.text,
+            harnessId: e.harnessId,
+            model: e.model,
+            canonicalSeq: e.seq,
+            timestamp: e.ts,
+          });
+        } else if (e.kind === "error") {
+          replay.push({
+            id: e.id,
+            type: "error",
+            message: e.text,
+            harnessId: e.harnessId,
+            model: e.model,
+            canonicalSeq: e.seq,
+            timestamp: e.ts,
+          });
+        } else if (e.kind === "harness_switched") {
+          replay.push({
+            id: e.id,
+            type: "harness_switched",
+            harnessId: e.switchedTo ?? e.harnessId,
+            switchedFrom: e.switchedFrom,
+            switchedTo: e.switchedTo,
+            syncedTurnsRange: e.syncedTurnsRange,
+            syncStrategy: e.syncStrategy,
+            model: e.model,
+            text: e.text,
+            canonicalSeq: e.seq,
+            timestamp: e.ts,
+          });
+        }
+      }
+      return replay;
+    },
+    deleteSession: (sessionId) => {
+      canonicalSyncService.deleteSession(sessionId);
+    },
+  };
+
+  const syncSessionBridge: SyncSessionBridgePort = {
+    getSession: (sessionId) => sessions.get(sessionId),
+    applyHarnessSwitch: (params) => {
+      const existing = sessions.get(params.sessionId);
+      if (!existing) return null;
+      const updated = {
+        ...existing,
+        harnessId: params.harnessId,
+        model: params.model,
+        agentProfile: params.agentProfile ?? (existing.harnessId === params.harnessId ? existing.agentProfile : undefined),
+        controlMode: params.adoptInteractive ? ("interactive" as const) : existing.controlMode,
+        externalSessionId: params.externalSessionId,
+        tmuxSession: params.tmuxSession,
+        transcriptPath: params.transcriptPath,
+        status: "idle" as const,
+        pendingInteraction: null,
+        updatedAt: isoNow(systemClock),
+      };
+      sessions.save(updated);
+      return updated;
+    },
+  };
+  const syncPublisher: SyncEventPublisherPort = {
+    publishChatEvent: (sessionId, event) => {
+      eventBus.publish(sessionId, event);
+    },
+    publishSessionUpsert: (session) => {
+      const full = sessions.get(session.id);
+      if (!full) return;
+      eventBus.publishListEvent({
+        type: "upsert",
+        session: full,
+        syncSummary: canonicalSyncService.getSyncSummary(full.id, full.model),
+      });
+    },
+    unwatchPreviousObserver: (sessionId) => {
+      unwatchObserver(sessionId);
+    },
+  };
+  const switchHarness = new SwitchHarnessUsecase(
+    syncSessionBridge,
+    syncHarnessPort,
+    canonicalSyncService,
+    syncPublisher,
+    externalIngest,
+    systemClock,
+  );
 
   const agentsRepo = new FileAgentsRepository(join(env.harnessHome, "agents"));
   const teamTasksWatcher = new ClaudeTeamTasksWatcher(env.claudeHome);
@@ -384,6 +660,7 @@ export function createApp(options: CreateAppOptions = {}) {
     fileChangeTracker,
     agentTelemetry,
     harnessGateway,
+    canonicalSync,
   );
   const discovery = new SessionDiscoveryService({
     claudeHome: env.claudeHome,
@@ -397,6 +674,12 @@ export function createApp(options: CreateAppOptions = {}) {
     .use(errorPlugin({ host: env.host, token: env.token }))
     .use(harnessRoutes({ registry: harnessRegistry }))
     .use(
+      syncRoutes({
+        canonicalSync: canonicalSyncService,
+        switchHarness,
+      }),
+    )
+    .use(
       chatRoutes({
         sessions,
         runner,
@@ -408,6 +691,7 @@ export function createApp(options: CreateAppOptions = {}) {
         fileChangeTracker,
         agentTelemetry,
         harnessGateway,
+        canonicalSync,
         runtime: {
           port: env.port,
           token: env.token,
@@ -462,6 +746,11 @@ export function createApp(options: CreateAppOptions = {}) {
     syncAgents,
     harnessRegistry,
     harnessGateway,
+    canonicalRepo,
+    canonicalSyncService,
+    canonicalSync,
+    externalIngest,
+    switchHarness,
   };
 }
 
@@ -474,6 +763,7 @@ export async function reconcilePersistedSessions(
   fileChangeTracker?: FileChangeTrackerPort,
   agentTelemetry?: AgentTelemetryPort,
   harnessGateway?: HarnessGatewayPort,
+  canonicalSync?: CanonicalSyncPort,
 ): Promise<void> {
   const active = await runner.listActiveSessions().catch(() => []);
   const activeNames = new Set(active.map((a) => a.name));
@@ -486,6 +776,8 @@ export async function reconcilePersistedSessions(
       current = markStopped(current, systemClock);
       sessions.save(current);
     }
+
+    canonicalSync?.ensureSession(current);
 
     if (
       !current.archivedAt &&
@@ -501,6 +793,7 @@ export async function reconcilePersistedSessions(
           coordinator,
           fileChangeTracker,
           agentTelemetry,
+          canonicalSync,
         });
       } else if (current.transcriptPath) {
         await watchTranscriptWithSync(current.id, current.transcriptPath, {
@@ -510,6 +803,7 @@ export async function reconcilePersistedSessions(
           coordinator,
           fileChangeTracker,
           agentTelemetry,
+          canonicalSync,
         });
       }
     }
@@ -547,6 +841,8 @@ if (import.meta.main) {
     agentTelemetry,
     harnessRegistry,
     harnessGateway,
+    canonicalRepo,
+    canonicalSync,
   } = createApp();
   await reconcilePersistedSessions(
     sessions,
@@ -557,6 +853,7 @@ if (import.meta.main) {
     fileChangeTracker,
     agentTelemetry,
     harnessGateway,
+    canonicalSync,
   );
   discovery.start();
 
@@ -567,6 +864,9 @@ if (import.meta.main) {
   const cleanup = () => {
     discovery.stop();
     void harnessRegistry.dispose();
+    if ("close" in canonicalRepo && typeof canonicalRepo.close === "function") {
+      canonicalRepo.close();
+    }
     try {
       rmSync(runtimePath, { force: true });
     } catch {

@@ -31,6 +31,7 @@ import {
   UpdateSessionUsecase,
   UploadImageUsecase,
   type AgentTelemetryPort,
+  type CanonicalSyncPort,
   type EventBusPort,
   type FileChangeTrackerPort,
   type HarnessGatewayPort,
@@ -46,14 +47,26 @@ function toChatContract(sessionId: string, event: DomainChatEvent): ChatStreamEv
   return { sessionId, ...event };
 }
 
-function toSessionInfo(session: Session): SessionInfo {
-  return { ...session };
+function buildSessionInfo(
+  session: Session,
+  canonicalSync?: CanonicalSyncPort,
+): SessionInfo {
+  const syncSummary = canonicalSync?.getSyncSummary(session.id, session.model);
+  return syncSummary ? { ...session, syncSummary } : { ...session };
 }
 
-function toListContract(event: SessionListEvent): SessionsListEvent {
+function buildListContract(
+  event: SessionListEvent,
+  canonicalSync?: CanonicalSyncPort,
+): SessionsListEvent {
+  const sessionInfo = event.session
+    ? event.syncSummary
+      ? { ...event.session, syncSummary: event.syncSummary }
+      : buildSessionInfo(event.session, canonicalSync)
+    : undefined;
   return {
     type: event.type,
-    session: event.session ? toSessionInfo(event.session) : undefined,
+    session: sessionInfo,
     sessionId: event.sessionId,
     agent: event.agent,
   };
@@ -117,6 +130,7 @@ export interface ChatRoutesDeps {
   fileChangeTracker?: FileChangeTrackerPort;
   agentTelemetry?: AgentTelemetryPort;
   harnessGateway?: HarnessGatewayPort;
+  canonicalSync?: CanonicalSyncPort;
 }
 
 export function chatRoutes(deps: ChatRoutesDeps) {
@@ -131,8 +145,11 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     fileChangeTracker,
     agentTelemetry,
     harnessGateway,
+    canonicalSync,
   } = deps;
   const coordinator = deps.coordinator ?? new InteractionCoordinator();
+  const toSessionInfo = (session: Session) => buildSessionInfo(session, canonicalSync);
+  const toListContract = (event: SessionListEvent) => buildListContract(event, canonicalSync);
 
   const sendMessage = new SendMessageUsecase(
     sessions,
@@ -145,6 +162,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     fileChangeTracker,
     agentTelemetry,
     harnessGateway,
+    canonicalSync,
   );
   const handleHook = new HandleHookUsecase(
     sessions,
@@ -157,6 +175,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     fileChangeTracker,
     agentTelemetry,
     harnessGateway,
+    canonicalSync,
   );
   const sendInput = new SendInputUsecase(
     sessions,
@@ -177,6 +196,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     fileChangeTracker,
     agentTelemetry,
     harnessGateway,
+    canonicalSync,
   );
   const updateSession = new UpdateSessionUsecase(
     sessions,
@@ -203,6 +223,7 @@ export function chatRoutes(deps: ChatRoutesDeps) {
     fileChangeTracker,
     agentTelemetry,
     harnessGateway,
+    canonicalSync,
   );
   const listWorkspaceFiles = new ListWorkspaceFilesUsecase(workspace, runtime.defaultCwd);
   const uploadImage = new UploadImageUsecase(workspace, runtime.defaultCwd);
@@ -353,13 +374,20 @@ export function chatRoutes(deps: ChatRoutesDeps) {
       const session = sessions.get(params.id);
       if (!session) throw new SessionNotFoundError(params.id);
 
-      const diskEvents = harnessGateway
-        ? await harnessGateway.readRecentEvents(session).catch(() => [])
-        : session.transcriptPath
-          ? await watcher.readRecentEvents(session.transcriptPath).catch(() => [])
-          : [];
-      const recentEvents =
-        diskEvents.length > 0 ? diskEvents : eventBus.getRecentEvents(session.id);
+      const canonicalEvents = canonicalSync?.getCanonicalReplayEvents(session.id) ?? [];
+      let recentEvents = canonicalEvents;
+      if (recentEvents.length === 0) {
+        const diskEvents = harnessGateway
+          ? await harnessGateway.readRecentEvents(session).catch(() => [])
+          : session.transcriptPath
+            ? await watcher.readRecentEvents(session.transcriptPath).catch(() => [])
+            : [];
+        if (diskEvents.length > 0 && canonicalSync) {
+          await canonicalSync.ingestExternalSession(session, diskEvents).catch(() => {});
+        }
+        recentEvents =
+          diskEvents.length > 0 ? diskEvents : eventBus.getRecentEvents(session.id);
+      }
 
       const encoder = new TextEncoder();
       let unsubscribe: (() => void) | undefined;

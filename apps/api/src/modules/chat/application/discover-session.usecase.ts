@@ -13,6 +13,7 @@ import type { SessionRepository } from "../domain/repository.port.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
 import type {
   AgentTelemetryPort,
+  CanonicalSyncPort,
   EventBusPort,
   FileChangeTrackerPort,
   HarnessGatewayPort,
@@ -45,6 +46,7 @@ export class DiscoverSessionUsecase {
     private readonly fileChangeTracker?: FileChangeTrackerPort,
     private readonly agentTelemetry?: AgentTelemetryPort,
     private readonly harnessGateway?: HarnessGatewayPort,
+    private readonly canonicalSync?: CanonicalSyncPort,
   ) {}
 
   async execute(input: DiscoveredSessionInput): Promise<Session> {
@@ -91,6 +93,9 @@ export class DiscoverSessionUsecase {
 
       if (changed) {
         this.sessions.save(updated);
+        if (this.canonicalSync) {
+          await this.canonicalSync.ingestExternalSession(updated).catch(() => {});
+        }
         this.eventBus.publishListEvent({ type: "upsert", session: updated });
       }
       return updated;
@@ -130,6 +135,9 @@ export class DiscoverSessionUsecase {
     );
 
     this.sessions.save(created);
+    if (this.canonicalSync) {
+      await this.canonicalSync.ingestExternalSession(created).catch(() => {});
+    }
     this.eventBus.publishListEvent({ type: "upsert", session: created });
 
     if (this.harnessGateway && (created.transcriptPath || created.harnessId === "opencode")) {
@@ -141,6 +149,7 @@ export class DiscoverSessionUsecase {
         coordinator: this.coordinator,
         fileChangeTracker: this.fileChangeTracker,
         agentTelemetry: this.agentTelemetry,
+        canonicalSync: this.canonicalSync,
         clock: this.clock,
       });
     } else if (created.transcriptPath) {
@@ -151,6 +160,7 @@ export class DiscoverSessionUsecase {
         coordinator: this.coordinator,
         fileChangeTracker: this.fileChangeTracker,
         agentTelemetry: this.agentTelemetry,
+        canonicalSync: this.canonicalSync,
         clock: this.clock,
       });
     }

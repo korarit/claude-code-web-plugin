@@ -18,6 +18,7 @@ import type { SessionRepository } from "../domain/repository.port.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
 import type {
   AgentTelemetryPort,
+  CanonicalSyncPort,
   EventBusPort,
   FileChangeTrackerPort,
   HarnessGatewayPort,
@@ -65,6 +66,7 @@ export class HandleHookUsecase {
     private readonly fileChangeTracker?: FileChangeTrackerPort,
     private readonly agentTelemetry?: AgentTelemetryPort,
     private readonly harnessGateway?: HarnessGatewayPort,
+    private readonly canonicalSync?: CanonicalSyncPort,
   ) {}
 
   async execute(hook: DomainHookEvent): Promise<Result<HandleHookOutput, AppError>> {
@@ -92,6 +94,7 @@ export class HandleHookUsecase {
         coordinator: this.coordinator,
         fileChangeTracker: this.fileChangeTracker,
         agentTelemetry: this.agentTelemetry,
+        canonicalSync: this.canonicalSync,
         clock: this.clock,
       });
     } else if (next.transcriptPath) {
@@ -102,6 +105,7 @@ export class HandleHookUsecase {
         coordinator: this.coordinator,
         fileChangeTracker: this.fileChangeTracker,
         agentTelemetry: this.agentTelemetry,
+        canonicalSync: this.canonicalSync,
         clock: this.clock,
       });
     }
@@ -478,6 +482,7 @@ export class HandleHookUsecase {
     );
 
     this.sessions.save(session);
+    this.canonicalSync?.ensureSession(session);
     this.eventBus.publishListEvent({ type: "upsert", session });
     return session;
   }

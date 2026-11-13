@@ -1,14 +1,17 @@
 import type {
   AuthMode,
+  CanonicalSyncSummary,
   ChatInputRequest,
   DiscoveredExternalSession,
   HarnessId,
   ModelId,
   PendingInteraction,
+  SyncStrategy,
   UploadImageResponse,
   WorkspaceFileEntry,
 } from "@contracts/index";
 import type { DomainChatEvent, DomainHookEvent, SessionListEvent } from "../domain/chat.events.ts";
+import type { Session } from "../domain/session.entity.ts";
 
 export interface EnsureSessionOptions {
   sessionId: string;
@@ -156,4 +159,51 @@ export interface HarnessGatewayPort {
   readRecentEvents(session: HarnessSessionRef, limit?: number): Promise<DomainChatEvent[]>;
   discoverSessions?(): Promise<DiscoveredExternalSession[]>;
   watchExternalSessions?(onUpsert: (session: DiscoveredExternalSession) => void): () => void;
+}
+
+export interface PreparedSyncPrompt {
+  canonicalSessionId: string;
+  targetHarness: HarnessId;
+  rawPrompt: string;
+  promptToSend: string;
+  deltaFromSeq?: number;
+  deltaToSeq?: number;
+  deltaCount: number;
+  strategy?: SyncStrategy;
+  syncFilePath?: string;
+  largeContextWarning: boolean;
+  importedExternalSessionId?: string;
+  suggestedTmuxSessionName?: string;
+}
+
+export interface CanonicalSyncPort {
+  ensureSession(session: Session): void;
+  ingestEvent(
+    session: Session,
+    event: DomainChatEvent,
+  ): { inserted: boolean; cleanUserText?: string; canonicalSeq?: number };
+  ingestExternalSession(
+    session: Session,
+    preloadedEvents?: DomainChatEvent[],
+  ): Promise<void>;
+  preparePromptForSend(
+    session: Session,
+    prompt: string,
+    model: string,
+  ): Promise<PreparedSyncPrompt>;
+  commitPromptSent(params: {
+    prepared: PreparedSyncPrompt;
+    model: string;
+    externalSessionId?: string;
+    tmuxSession?: string;
+    transcriptPath?: string;
+  }): CanonicalSyncSummary | undefined;
+  updateBinding(
+    sessionId: string,
+    harnessId: HarnessId,
+    meta: { externalSessionId?: string; tmuxSession?: string; transcriptPath?: string },
+  ): void;
+  getSyncSummary(sessionId: string, targetModel?: string): CanonicalSyncSummary | undefined;
+  getCanonicalReplayEvents(sessionId: string, limit?: number): DomainChatEvent[];
+  deleteSession(sessionId: string): void;
 }

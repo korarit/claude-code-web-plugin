@@ -14,6 +14,7 @@ import {
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
 import type {
   AgentTelemetryPort,
+  CanonicalSyncPort,
   EventBusPort,
   FileChangeTrackerPort,
   HarnessGatewayPort,
@@ -49,6 +50,7 @@ export interface SyncObservedDeps {
   coordinator?: InteractionCoordinator;
   fileChangeTracker?: FileChangeTrackerPort;
   agentTelemetry?: AgentTelemetryPort;
+  canonicalSync?: CanonicalSyncPort;
   clock?: Clock;
 }
 
@@ -62,11 +64,13 @@ export function createObservedEventHandler(
     coordinator,
     fileChangeTracker,
     agentTelemetry,
+    canonicalSync,
     clock = systemClock,
   } = deps;
   const trackedTools = new Map<string, PendingTrackedTool>();
 
-  return (event: DomainChatEvent) => {
+  return (rawEvent: DomainChatEvent) => {
+    let event = rawEvent;
     let session = sessions.get(sessionId);
 
     if (session && (event.discoveredExternalSessionId || event.discoveredTranscriptPath)) {
@@ -79,6 +83,10 @@ export function createObservedEventHandler(
       }
       if (updated !== session) {
         sessions.save(updated);
+        canonicalSync?.updateBinding(updated.id, updated.harnessId, {
+          externalSessionId: updated.externalSessionId,
+          transcriptPath: updated.transcriptPath,
+        });
         eventBus.publishListEvent({ type: "upsert", session: updated });
         session = updated;
       }
@@ -136,6 +144,26 @@ export function createObservedEventHandler(
         sessions.save(updated);
         eventBus.publishListEvent({ type: "upsert", session: updated });
       }
+    }
+
+    let duplicateWebUserEcho = false;
+    if (canonicalSync && session) {
+      const ingested = canonicalSync.ingestEvent(session, event);
+      if (ingested.cleanUserText && event.type === "user") {
+        event = { ...event, text: ingested.cleanUserText };
+        if (!ingested.inserted && session.origin === "web") {
+          duplicateWebUserEcho = true;
+        }
+      }
+      if (ingested.canonicalSeq !== undefined) {
+        event = {
+          ...event,
+          harnessId: event.harnessId ?? session.harnessId,
+          canonicalSeq: ingested.canonicalSeq,
+        };
+      }
+    } else if (session && !event.harnessId) {
+      event = { ...event, harnessId: session.harnessId };
     }
 
     if (event.type === "user" && event.text && session && session.origin !== "web") {
@@ -207,6 +235,9 @@ export function createObservedEventHandler(
       return;
     }
     if (event.agentId && event.agentId !== "main") {
+      return;
+    }
+    if (duplicateWebUserEcho) {
       return;
     }
 

@@ -24,9 +24,11 @@ import type { SessionRepository } from "../domain/repository.port.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
 import type {
   AgentTelemetryPort,
+  CanonicalSyncPort,
   EventBusPort,
   FileChangeTrackerPort,
   HarnessGatewayPort,
+  PreparedSyncPrompt,
   TerminalRunnerPort,
   TranscriptWatcherPort,
 } from "./ports.ts";
@@ -78,6 +80,7 @@ export class SendMessageUsecase {
     private readonly fileChangeTracker?: FileChangeTrackerPort,
     private readonly agentTelemetry?: AgentTelemetryPort,
     private readonly harnessGateway?: HarnessGatewayPort,
+    private readonly canonicalSync?: CanonicalSyncPort,
   ) {}
 
   async execute(input: SendMessageInput): Promise<Result<SendMessageOutput, AppError>> {
@@ -144,6 +147,20 @@ export class SendMessageUsecase {
         this.clock,
       );
 
+    let preparedSync: PreparedSyncPrompt | undefined;
+    if (this.canonicalSync) {
+      this.canonicalSync.ensureSession(session);
+      preparedSync = await this.canonicalSync.preparePromptForSend(session, prompt, model);
+    }
+
+    const promptToSend = preparedSync?.promptToSend ?? prompt;
+    const targetResumeId =
+      preparedSync?.importedExternalSessionId ??
+      (isNewSession
+        ? undefined
+        : (session.externalSessionId ?? (harnessId === "claude" ? session.id : undefined)));
+    const targetTmuxName = preparedSync?.suggestedTmuxSessionName ?? session.tmuxSession;
+
     if (this.harnessGateway) {
       const started = await this.harnessGateway.startOrResumeSession(harnessId, {
         sessionId: session.id,
@@ -151,17 +168,17 @@ export class SendMessageUsecase {
         cwd,
         port: this.runtime.port,
         token: this.runtime.token,
-        resumeSessionId: isNewSession
-          ? undefined
-          : (session.externalSessionId ?? (harnessId === "claude" ? session.id : undefined)),
+        resumeSessionId: targetResumeId,
         authMode,
         apiKey: authMode === "api_key" ? this.runtime.anthropicApiKey : undefined,
         agentProfile,
-        tmuxSessionName: session.tmuxSession,
+        tmuxSessionName: targetTmuxName,
       });
 
       if (started.externalSessionId) {
         session = attachExternalSession(session, started.externalSessionId, this.clock);
+      } else if (preparedSync?.importedExternalSessionId) {
+        session = attachExternalSession(session, preparedSync.importedExternalSessionId, this.clock);
       }
       if (started.tmuxSession) {
         session = attachTmuxSession(session, started.tmuxSession, this.clock);
@@ -176,11 +193,11 @@ export class SendMessageUsecase {
         cwd,
         port: this.runtime.port,
         token: this.runtime.token,
-        resumeSessionId: isNewSession ? undefined : (session.externalSessionId ?? session.id),
+        resumeSessionId: targetResumeId ?? (isNewSession ? undefined : session.id),
         authMode,
         apiKey: authMode === "api_key" ? this.runtime.anthropicApiKey : undefined,
         agentProfile,
-        tmuxSessionName: session.tmuxSession,
+        tmuxSessionName: targetTmuxName,
       });
 
       const transcriptPath =
@@ -196,9 +213,6 @@ export class SendMessageUsecase {
     session = markRunning(session, this.clock, model);
     session = recordPrompt(session, prompt, this.clock);
 
-    this.sessions.save(session);
-    this.eventBus.publishListEvent({ type: "upsert", session });
-
     if (this.harnessGateway) {
       await observeHarnessSessionWithSync(session, {
         sessions: this.sessions,
@@ -208,6 +222,7 @@ export class SendMessageUsecase {
         coordinator: this.coordinator,
         fileChangeTracker: this.fileChangeTracker,
         agentTelemetry: this.agentTelemetry,
+        canonicalSync: this.canonicalSync,
         clock: this.clock,
       });
     } else if (session.transcriptPath) {
@@ -218,15 +233,38 @@ export class SendMessageUsecase {
         coordinator: this.coordinator,
         fileChangeTracker: this.fileChangeTracker,
         agentTelemetry: this.agentTelemetry,
+        canonicalSync: this.canonicalSync,
         clock: this.clock,
       });
     }
+
+    let syncSummary = undefined;
+    if (this.canonicalSync && preparedSync) {
+      syncSummary = this.canonicalSync.commitPromptSent({
+        prepared: preparedSync,
+        model,
+        externalSessionId: session.externalSessionId,
+        tmuxSession: session.tmuxSession,
+        transcriptPath: session.transcriptPath,
+      });
+    }
+
+    this.sessions.save(session);
+    this.eventBus.publishListEvent({ type: "upsert", session, syncSummary });
 
     const now = isoNow(this.clock);
     this.eventBus.publish(session.id, {
       type: "user",
       role: "user",
       text: prompt,
+      harnessId: session.harnessId,
+      model,
+      syncedTurnsRange:
+        preparedSync?.deltaFromSeq !== undefined && preparedSync?.deltaToSeq !== undefined
+          ? { fromSeq: preparedSync.deltaFromSeq, toSeq: preparedSync.deltaToSeq }
+          : undefined,
+      syncStrategy: preparedSync?.strategy,
+      syncFilePath: preparedSync?.syncFilePath,
       timestamp: now,
     });
     this.eventBus.publish(session.id, {
@@ -237,9 +275,9 @@ export class SendMessageUsecase {
 
     try {
       if (this.harnessGateway) {
-        await this.harnessGateway.sendPrompt(session, prompt, { model, agentProfile });
+        await this.harnessGateway.sendPrompt(session, promptToSend, { model, agentProfile });
       } else {
-        await this.runner.sendPrompt(session.tmuxSession!, prompt);
+        await this.runner.sendPrompt(session.tmuxSession!, promptToSend);
       }
     } catch (e) {
       const recovered = markIdle(session, this.clock);

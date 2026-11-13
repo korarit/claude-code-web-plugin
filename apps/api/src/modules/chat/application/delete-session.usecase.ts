@@ -5,6 +5,7 @@ import type { SessionRepository } from "../domain/repository.port.ts";
 import type { InteractionCoordinator } from "./interaction-coordinator.ts";
 import type {
   AgentTelemetryPort,
+  CanonicalSyncPort,
   EventBusPort,
   FileChangeTrackerPort,
   HarnessGatewayPort,
@@ -22,6 +23,7 @@ export class DeleteSessionUsecase {
     private readonly fileChangeTracker?: FileChangeTrackerPort,
     private readonly agentTelemetry?: AgentTelemetryPort,
     private readonly harnessGateway?: HarnessGatewayPort,
+    private readonly canonicalSync?: CanonicalSyncPort,
   ) {}
 
   async execute(sessionId: string): Promise<Result<{ deleted: true; id: string }, AppError>> {
@@ -37,6 +39,7 @@ export class DeleteSessionUsecase {
     this.watcher.unwatch(existing.id);
     await this.fileChangeTracker?.deleteSession?.(existing.id).catch(() => {});
     this.agentTelemetry?.deleteSession?.(existing.id);
+    this.canonicalSync?.deleteSession(existing.id);
     this.sessions.delete(existing.id);
     this.eventBus.clearSession(existing.id);
     this.eventBus.publishListEvent({ type: "delete", sessionId: existing.id });

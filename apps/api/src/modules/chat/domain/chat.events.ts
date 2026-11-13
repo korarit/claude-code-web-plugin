@@ -1,10 +1,13 @@
 import type {
   AgentNode,
+  CanonicalSyncSummary,
   HarnessId,
   PendingInteraction,
   PermissionPromptPayload,
   SessionFileChange,
   SessionStatus,
+  SyncStrategy,
+  SyncedTurnsRange,
   TeamTaskItem,
 } from "@contracts/index";
 import type { Session } from "./session.entity.ts";
@@ -23,7 +26,8 @@ export type DomainChatEventType =
   | "interaction_resolved"
   | "file_changed"
   | "agent_updated"
-  | "tasks_updated";
+  | "tasks_updated"
+  | "harness_switched";
 
 export interface TokenUsage {
   inputTokens?: number;
@@ -52,6 +56,13 @@ export interface DomainChatEvent {
   tasks?: TeamTaskItem[];
   agentId?: string;
   model?: string;
+  harnessId?: HarnessId;
+  switchedFrom?: HarnessId;
+  switchedTo?: HarnessId;
+  syncedTurnsRange?: SyncedTurnsRange;
+  syncStrategy?: SyncStrategy;
+  syncFilePath?: string;
+  canonicalSeq?: number;
   message?: string;
   timestamp?: string;
   discoveredExternalSessionId?: string;
@@ -83,6 +94,7 @@ export interface DomainHookEvent {
 export interface SessionListEvent {
   type: "upsert" | "delete" | "agent_updated";
   session?: Session;
+  syncSummary?: CanonicalSyncSummary;
   sessionId?: string;
   agent?: AgentNode;
 }
