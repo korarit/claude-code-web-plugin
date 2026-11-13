@@ -13,8 +13,8 @@
 | :---: | :--- | :---: | :--- |
 | **Phase 0** | [Monorepo Foundation & V1 Spike (`claude -p`)](./phase-00-monorepo-and-v1-spike.md) | ✅ Done | [20261103-claude-web-ui.md](../feature/20261103-claude-web-ui.md) |
 | **Phase 1** | [Interactive `tmux` Runner + `.jsonl` Watcher + Hooks](./phase-01-interactive-tmux-jsonl-hooks.md) | ✅ Done | [20261113-interactive-tmux-jsonl-runner.md](../feature/20261113-interactive-tmux-jsonl-runner.md) |
-| **Phase 2** | [Interactive Controls, Session Discovery & Auth Modes](./phase-02-interactive-controls-and-discovery.md) | 🚧 Next | — |
-| **Phase 3** | [Session Code Preview, File Changes & Diff Viewer](./phase-03-code-preview-and-file-changes.md) | 📋 Planned | — |
+| **Phase 2** | [Interactive Controls, Session Discovery & Auth Modes](./phase-02-interactive-controls-and-discovery.md) | ✅ Done | [20261113-interactive-controls-and-discovery.md](../feature/20261113-interactive-controls-and-discovery.md) |
+| **Phase 3** | [Session Code Preview, File Changes & Diff Viewer](./phase-03-code-preview-and-file-changes.md) | 🚧 Next | — |
 | **Phase 4** | [Multi-Agent Visibility & Worktree Dashboard](./phase-04-multi-agent-and-worktree-dashboard.md) | 📋 Planned | — |
 | **Phase 5** | [Multi-Harness Adapters (`Claude CLI`, `Antigravity CLI`, `OpenCode`)](./phase-05-multi-harness-adapters.md) | 📋 Planned | — |
 | **Phase 6** | [Canonical Session Store & Full-Verbatim Cross-Harness Sync](./phase-06-canonical-session-and-sync.md) | 📋 Planned | — |

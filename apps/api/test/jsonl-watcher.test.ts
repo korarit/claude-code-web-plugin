@@ -132,4 +132,72 @@ describe("jsonl-watcher parser", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("parses AskUserQuestion into interaction event and tool_result into interaction_resolved", () => {
+    const askEvents = parseClaudeTranscriptLine(
+      JSON.stringify({
+        type: "assistant",
+        uuid: "a-ask",
+        timestamp: "2026-11-13T12:00:00Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_ask_1",
+              name: "AskUserQuestion",
+              input: {
+                questions: [
+                  {
+                    header: "DB",
+                    question: "Which database should we use?",
+                    multiSelect: false,
+                    options: [
+                      { label: "SQLite", description: "Local file DB" },
+                      { label: "Postgres", description: "Server DB" },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(askEvents.map((e) => e.type)).toEqual(["tool", "interaction"]);
+    expect(askEvents[1]?.interaction).toMatchObject({
+      kind: "question",
+      toolUseId: "toolu_ask_1",
+      questions: [
+        {
+          id: "DB",
+          prompt: "Which database should we use?",
+          multiSelect: false,
+          options: [
+            { id: "SQLite", label: "SQLite", description: "Local file DB" },
+            { id: "Postgres", label: "Postgres", description: "Server DB" },
+          ],
+        },
+      ],
+    });
+
+    const resolvedEvents = parseClaudeTranscriptLine(
+      JSON.stringify({
+        type: "user",
+        uuid: "u-ask-res",
+        timestamp: "2026-11-13T12:00:05Z",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "toolu_ask_1", content: "SQLite" }],
+        },
+      }),
+    );
+    expect(resolvedEvents.map((e) => e.type)).toEqual(["tool", "interaction_resolved"]);
+    expect(resolvedEvents[1]).toMatchObject({
+      type: "interaction_resolved",
+      toolUseId: "toolu_ask_1",
+      interactionId: "toolu_ask_1",
+    });
+  });
 });

@@ -99,4 +99,64 @@ describe("tmux-runner", () => {
     await runner.stopSession(ensured.tmuxSession);
     expect(calls.some((c) => c.cmd[1] === "kill-session" && c.cmd.includes("cw-sess-1"))).toBe(true);
   });
+
+  test("supports --agent profile, isolated ANTHROPIC_API_KEY env, capturePane, and list-panes", async () => {
+    const cmd = buildClaudeInteractiveCommand({
+      sessionId: "s-agent",
+      model: "opus",
+      agentProfile: "reviewer",
+    });
+    expect(cmd).toBe("'claude' '--session-id' 's-agent' '--model' 'opus' '--agent' 'reviewer'");
+
+    const apiKeyArgs = buildNewSessionArgs("cw-api", {
+      sessionId: "s-api",
+      model: "sonnet",
+      cwd: "/tmp/repo",
+      port: 3000,
+      token: "t-1",
+      authMode: "api_key",
+      apiKey: "sk-ant-test-key",
+    });
+    expect(apiKeyArgs).toContain("ANTHROPIC_API_KEY=sk-ant-test-key");
+
+    const defaultArgs = buildNewSessionArgs("cw-def", {
+      sessionId: "s-def",
+      model: "sonnet",
+      cwd: "/tmp/repo",
+      port: 3000,
+      token: "t-1",
+      authMode: "machine_default",
+      apiKey: "should-not-leak",
+    });
+    expect(defaultArgs.some((a) => a.includes("ANTHROPIC_API_KEY"))).toBe(false);
+
+    const calls: string[][] = [];
+    const runner = new TmuxRunner({
+      exec: async (c) => {
+        calls.push(c);
+        if (c[1] === "capture-pane") return { exitCode: 0, stdout: "pane output\n", stderr: "" };
+        if (c[1] === "list-panes") {
+          return {
+            exitCode: 0,
+            stdout: "ext-cli\t/tmp/proj\tclaude\t4242\n",
+            stderr: "",
+          };
+        }
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+    });
+
+    await runner.sendKeysSequence("cw-api", ["Down", "Space", "Enter"]);
+    expect(calls.filter((c) => c[1] === "send-keys").map((c) => c[4])).toEqual([
+      "Down",
+      "Space",
+      "Enter",
+    ]);
+
+    expect(await runner.capturePane("cw-api", 50)).toBe("pane output\n");
+    const active = await runner.listActiveSessions();
+    expect(active).toEqual([
+      { name: "ext-cli", cwd: "/tmp/proj", paneCommand: "claude", panePid: 4242 },
+    ]);
+  });
 });

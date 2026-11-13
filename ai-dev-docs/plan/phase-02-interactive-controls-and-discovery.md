@@ -1,7 +1,8 @@
 # Phase 2: Interactive Controls, Session Discovery & Auth Modes
 
-> **Status:** 📋 Planned  
+> **Status:** ✅ Done  
 > **Parent Plan:** [roadmap.md](./roadmap.md)  
+> **Feature Doc:** [20261113-interactive-controls-and-discovery.md](../feature/20261113-interactive-controls-and-discovery.md)  
 > **Depends On:** [Phase 1](./phase-01-interactive-tmux-jsonl-hooks.md)
 
 ## 1. Objective
