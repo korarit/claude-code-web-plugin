@@ -302,7 +302,19 @@ export function useChat({
                 (!last.harnessId || !event.harnessId || last.harnessId === event.harnessId)
               ) {
                 if (last.text === text) return prev;
-                const nextText = last.text ? `${last.text}\n\n${text}` : text;
+                const ocMatch =
+                  event.harnessId === "opencode" && event.id
+                    ? event.id.match(/^(.+)-(\d+)$/)
+                    : null;
+                const sameOpenCodePart =
+                  Boolean(ocMatch) &&
+                  Boolean(last.id?.startsWith(`${ocMatch![1]}-`)) &&
+                  Number(ocMatch![2]) > 0;
+                const nextText = last.text
+                  ? sameOpenCodePart
+                    ? `${last.text}${text}`
+                    : `${last.text}\n\n${text}`
+                  : text;
                 return [
                   ...prev.slice(0, -1),
                   {

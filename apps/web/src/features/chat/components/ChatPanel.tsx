@@ -614,7 +614,7 @@ export default function ChatPanel({
                     <select
                       aria-label={t("switchHarnessLabel")}
                       value={activeSession.harnessId}
-                      disabled={isBusy || sending || switchingHarness || isReadOnlySubagent}
+                      disabled={(!isMirror && isBusy) || sending || switchingHarness || isReadOnlySubagent}
                       onChange={(e) => onSwitchHarness(e.target.value as HarnessId)}
                       className="rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-1 text-xs font-medium text-[var(--text-primary)] outline-none disabled:opacity-50"
                     >
