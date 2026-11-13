@@ -1,3 +1,5 @@
+import type { SessionFileChange } from "./changes.ts";
+
 export type ModelId = "sonnet" | "opus" | "haiku";
 
 export const AVAILABLE_MODELS: readonly ModelId[] = ["sonnet", "opus", "haiku"];
@@ -112,7 +114,8 @@ export type ChatEventType =
   | "status"
   | "permission_prompt"
   | "interaction"
-  | "interaction_resolved";
+  | "interaction_resolved"
+  | "file_changed";
 
 export interface PermissionPromptPayload {
   tool?: string;
@@ -145,6 +148,8 @@ export interface ChatStreamEvent {
   permissionPrompt?: PermissionPromptPayload;
   interaction?: PendingInteraction;
   interactionId?: string;
+  fileChange?: SessionFileChange;
+  model?: string;
   message?: string;
   timestamp?: string;
 }
