@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 import type { AgentNode } from "@contracts/agents";
 import type { SessionFileChange } from "@contracts/changes";
+import type { HarnessDescriptor, HarnessId } from "@contracts/harness";
 import type { GitWorktreeInfo } from "@contracts/workspace";
 import {
   AVAILABLE_MODELS,
@@ -19,22 +20,20 @@ import { getAgentStateMeta } from "../agentStateMeta.ts";
 import { fetchWorkspaceFiles } from "../api.ts";
 import type { ChatMessage, TaskEntry, UsageState } from "../hooks/useChat.ts";
 import ContextBar from "./ContextBar.tsx";
+import HarnessBadge from "./HarnessBadge.tsx";
+import HarnessPicker from "./HarnessPicker.tsx";
 import InteractionCard from "./InteractionCard.tsx";
 import MarkdownContent from "./MarkdownContent.tsx";
 import TaskTimeline from "./TaskTimeline.tsx";
 import ToolCallBlock from "./ToolCallBlock.tsx";
 
-const SLASH_COMMANDS = [
-  "/model sonnet",
-  "/model opus",
-  "/model haiku",
-  "/compact",
-  "/clear",
-  "/cost",
-] as const;
+const BASE_SLASH_COMMANDS = ["/compact", "/clear", "/cost"] as const;
 
 export interface ChatPanelProps {
   activeSession?: SessionInfo;
+  harnesses?: HarnessDescriptor[];
+  harnessId?: HarnessId;
+  onHarnessChange?: (harnessId: HarnessId) => void;
   tmuxAvailable: boolean;
   apiKeyConfigured: boolean;
   recentCwds: string[];
@@ -78,6 +77,9 @@ export interface ChatPanelProps {
 
 export default function ChatPanel({
   activeSession,
+  harnesses = [],
+  harnessId = "claude",
+  onHarnessChange,
   tmuxAvailable,
   apiKeyConfigured,
   recentCwds,
@@ -174,12 +176,6 @@ export default function ChatPanel({
   const isSubagentView = Boolean(activeAgent && activeAgent.agentId !== "main");
   const isReadOnlySubagent = Boolean(isSubagentView && activeAgent && !activeAgent.canSendInput);
 
-  const filteredSlashCommands = useMemo(() => {
-    if (!slashOpen) return [];
-    const prefix = draft.trim().toLowerCase();
-    return SLASH_COMMANDS.filter((c) => !prefix.startsWith("/") || c.startsWith(prefix));
-  }, [draft, slashOpen]);
-
   const insertSlashCommand = (cmd: string) => {
     onDraftChange(cmd);
     setSlashOpen(false);
@@ -210,6 +206,28 @@ export default function ChatPanel({
   };
 
   const effectiveAuthMode = activeSession?.authMode ?? authMode;
+  const effectiveHarnessId = activeSession?.harnessId ?? harnessId;
+  const activeHarness = harnesses.find((h) => h.id === effectiveHarnessId);
+  const modelOptions = useMemo(() => {
+    const base =
+      activeHarness && activeHarness.models.length > 0
+        ? [...activeHarness.models]
+        : [...AVAILABLE_MODELS];
+    if (model && !base.includes(model)) {
+      base.unshift(model);
+    }
+    return base;
+  }, [activeHarness, model]);
+  const slashCommands = useMemo(() => {
+    const modelCmds = modelOptions.slice(0, 8).map((m) => `/model ${m}`);
+    return [...modelCmds, ...BASE_SLASH_COMMANDS];
+  }, [modelOptions]);
+  const filteredSlashCommands = useMemo(() => {
+    if (!slashOpen) return [];
+    const prefix = draft.trim().toLowerCase();
+    return slashCommands.filter((c) => !prefix.startsWith("/") || c.toLowerCase().startsWith(prefix));
+  }, [draft, slashOpen, slashCommands]);
+  const profileSuggestions = activeHarness?.agentProfiles ?? [];
 
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-[var(--bg-canvas)]">
@@ -305,12 +323,18 @@ export default function ChatPanel({
           </div>
         )}
 
-        {status === "running" && activeSession?.tmuxSession && (
-          <div className="flex items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
-            <span>{t("sessionRunningBanner", { tmux: activeSession.tmuxSession })}</span>
-          </div>
-        )}
+        {status === "running" &&
+          activeSession &&
+          (activeSession.tmuxSession || activeSession.harnessId === "opencode") && (
+            <div className="flex items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+              <span>
+                {activeSession.tmuxSession
+                  ? t("sessionRunningBanner", { tmux: activeSession.tmuxSession })
+                  : t("sessionRunningGeneric")}
+              </span>
+            </div>
+          )}
 
         {status === "stopped" && activeSession && !isMirror && (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-muted)]">
@@ -452,6 +476,15 @@ export default function ChatPanel({
 
         <div className="mx-auto max-w-4xl space-y-2">
           <div className="flex flex-wrap items-center gap-2 text-xs">
+            {!activeSession && harnesses.length > 0 && (
+              <HarnessPicker
+                harnesses={harnesses}
+                value={harnessId}
+                disabled={sending}
+                onChange={(next) => onHarnessChange?.(next)}
+              />
+            )}
+
             <label className="flex items-center gap-1.5 text-[var(--text-secondary)]">
               <span>{t("modelLabel")}</span>
               <select
@@ -460,7 +493,7 @@ export default function ChatPanel({
                 disabled={isBusy || sending || isMirror}
                 className="rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none"
               >
-                {AVAILABLE_MODELS.map((m) => (
+                {modelOptions.map((m) => (
                   <option key={m} value={m}>
                     {m}
                   </option>
@@ -521,16 +554,25 @@ export default function ChatPanel({
                   <span className="shrink-0">{t("agentProfileLabel")}</span>
                   <input
                     type="text"
+                    list="hw-agent-profiles"
                     value={agentProfile}
                     onChange={(e) => onAgentProfileChange(e.target.value)}
                     placeholder={t("agentProfilePlaceholder")}
                     disabled={sending}
                     className="w-32 rounded border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-1 font-mono text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
                   />
+                  {profileSuggestions.length > 0 && (
+                    <datalist id="hw-agent-profiles">
+                      {profileSuggestions.map((p) => (
+                        <option key={p} value={p} />
+                      ))}
+                    </datalist>
+                  )}
                 </label>
               </>
             ) : (
               <div className="flex flex-wrap items-center gap-1.5">
+                <HarnessBadge harnessId={activeSession.harnessId} compact />
                 <span
                   className={`rounded px-2 py-0.5 text-[11px] font-medium ${
                     effectiveAuthMode === "api_key"

@@ -13,6 +13,7 @@ import { useAgents } from "../hooks/useAgents.ts";
 import { useAgentStream } from "../hooks/useAgentStream.ts";
 import { useChanges } from "../hooks/useChanges.ts";
 import { useChat } from "../hooks/useChat.ts";
+import { useHarnesses } from "../hooks/useHarnesses.ts";
 import { useSessions } from "../hooks/useSessions.ts";
 import { useWorktrees } from "../hooks/useWorktrees.ts";
 import AgentBoard from "./AgentBoard.tsx";
@@ -140,6 +141,7 @@ export default function WorkspacePage() {
     onAgentUpdated: (sid, agent) => applySessionAgentRef.current?.(sid, agent),
   });
 
+  const { harnesses } = useHarnesses();
   const agentsState = useAgents(activeSessionId);
   applySessionAgentRef.current = agentsState.applySessionAgentUpdated;
   const changes = useChanges({
@@ -204,6 +206,7 @@ export default function WorkspacePage() {
   const chat = useChat({
     activeSessionId,
     activeSession,
+    harnesses,
     defaultCwd,
     onSessionCreated: (created) => {
       upsertLocal(created);
@@ -348,6 +351,9 @@ export default function WorkspacePage() {
   const chatNode = (
     <ChatPanel
       activeSession={activeSession}
+      harnesses={harnesses}
+      harnessId={chat.harnessId}
+      onHarnessChange={chat.setHarnessId}
       tmuxAvailable={tmuxAvailable}
       apiKeyConfigured={apiKeyConfigured}
       recentCwds={recentCwds}

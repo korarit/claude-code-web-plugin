@@ -12,6 +12,7 @@ import type {
   SessionInfo,
   SessionStatus,
 } from "@contracts/chat";
+import type { HarnessDescriptor, HarnessId } from "@contracts/harness";
 import { newMessageId } from "@core/ids";
 import {
   abortSession,
@@ -58,6 +59,7 @@ const NEW_DRAFT_KEY = "__new__";
 export interface UseChatOptions {
   activeSessionId?: string;
   activeSession?: SessionInfo;
+  harnesses?: HarnessDescriptor[];
   defaultCwd?: string;
   onSessionCreated?: (session: SessionInfo) => void;
   onSessionUpdated?: (session: SessionInfo) => void;
@@ -70,6 +72,7 @@ export interface UseChatOptions {
 export function useChat({
   activeSessionId,
   activeSession,
+  harnesses = [],
   defaultCwd,
   onSessionCreated,
   onSessionUpdated,
@@ -78,6 +81,7 @@ export function useChat({
   onTasksUpdated,
   onErrorNotification,
 }: UseChatOptions) {
+  const [harnessId, setHarnessId] = useState<HarnessId>(activeSession?.harnessId ?? "claude");
   const [model, setModel] = useState<ModelId>(activeSession?.model ?? "sonnet");
   const [cwd, setCwd] = useState<string>(defaultCwd ?? "");
   const [authMode, setAuthMode] = useState<AuthMode>(activeSession?.authMode ?? "machine_default");
@@ -119,10 +123,26 @@ export function useChat({
   }, [defaultCwd, cwd]);
 
   useEffect(() => {
+    if (activeSessionId || harnesses.length === 0) return;
+    const current = harnesses.find((h) => h.id === harnessId);
+    if (current?.available) return;
+    const firstAvailable = harnesses.find((h) => h.available);
+    if (firstAvailable && firstAvailable.id !== harnessId) {
+      setHarnessId(firstAvailable.id);
+      if (firstAvailable.defaultModel) {
+        setModel(firstAvailable.defaultModel);
+      }
+    }
+  }, [activeSessionId, harnesses, harnessId]);
+
+  useEffect(() => {
     if (!activeSessionId) {
       setAuthMode("machine_default");
       setAgentProfile("");
       return;
+    }
+    if (activeSession?.harnessId) {
+      setHarnessId(activeSession.harnessId);
     }
     if (activeSession?.model) {
       setModel(activeSession.model);
@@ -146,6 +166,7 @@ export function useChat({
   }, [
     activeSessionId,
     activeSession?.id,
+    activeSession?.harnessId,
     activeSession?.model,
     activeSession?.authMode,
     activeSession?.agentProfile,
@@ -389,6 +410,7 @@ export function useChat({
         const res = await sendChat({
           prompt: text,
           sessionId: activeSessionId,
+          harnessId: activeSessionId ? undefined : harnessId,
           model,
           cwd: activeSessionId ? undefined : cwd.trim() || undefined,
           authMode: activeSessionId ? undefined : authMode,
@@ -417,12 +439,26 @@ export function useChat({
       cwd,
       draft,
       draftKey,
+      harnessId,
       model,
       onSessionCreated,
       onSessionUpdated,
       sending,
       status,
     ],
+  );
+
+  const selectHarness = useCallback(
+    (nextHarnessId: HarnessId) => {
+      if (activeSessionId) return;
+      setHarnessId(nextHarnessId);
+      const descriptor = harnesses.find((h) => h.id === nextHarnessId);
+      if (descriptor?.defaultModel) {
+        setModel(descriptor.defaultModel);
+      }
+      setAgentProfile("");
+    },
+    [activeSessionId, harnesses],
   );
 
   const switchModelMidSession = useCallback(
@@ -543,6 +579,8 @@ export function useChat({
   }, [activeSessionId, onSessionUpdated]);
 
   return {
+    harnessId,
+    setHarnessId: selectHarness,
     model,
     setModel: switchModelMidSession,
     cwd,

@@ -1,10 +1,12 @@
 import { useState } from "react";
 import type { AgentActivityState, AgentNode } from "@contracts/agents";
 import type { SessionInfo, SessionOrigin } from "@contracts/chat";
+import type { HarnessId } from "@contracts/harness";
 import type { GitWorktreeInfo } from "@contracts/workspace";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 import type { SessionFilters } from "../hooks/useSessions.ts";
 import ConfirmDeleteModal from "./ConfirmDeleteModal.tsx";
+import HarnessBadge from "./HarnessBadge.tsx";
 
 function folderName(cwd?: string): string {
   if (!cwd) return "";
@@ -227,6 +229,7 @@ export default function SessionSidebar({
                   {sessionTitle(s)}
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-[var(--text-muted)]">
+                  <HarnessBadge harnessId={s.harnessId} compact />
                   <span className="rounded bg-[var(--bg-muted)] px-1 py-0.5 font-medium text-[var(--text-secondary)]">
                     {originLabel(s.origin)}
                   </span>
@@ -334,25 +337,42 @@ export default function SessionSidebar({
           className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--border-strong)] focus:outline-none"
         />
 
-        <div className="grid grid-cols-2 gap-1.5">
-          <select
-            value={filters.origin}
-            onChange={(e) =>
-              onFiltersChange({ ...filters, origin: e.target.value as SessionOrigin | "all" })
-            }
-            className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-1 text-[11px] text-[var(--text-secondary)] outline-none"
-          >
-            <option value="all">{t("allSources")}</option>
-            <option value="web">{t("originWeb")}</option>
-            <option value="cli">{t("originCli")}</option>
-            <option value="tmux">{t("originTmux")}</option>
-            <option value="ide">{t("originIde")}</option>
-          </select>
+        <div className="space-y-1.5">
+          <div className="grid grid-cols-2 gap-1.5">
+            <select
+              aria-label={t("harnessLabel")}
+              value={filters.harness}
+              onChange={(e) =>
+                onFiltersChange({ ...filters, harness: e.target.value as HarnessId | "all" })
+              }
+              className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-1 text-[11px] text-[var(--text-secondary)] outline-none"
+            >
+              <option value="all">{t("allHarnesses")}</option>
+              <option value="claude">{t("harnessClaude")}</option>
+              <option value="agy">{t("harnessAgy")}</option>
+              <option value="opencode">{t("harnessOpencode")}</option>
+            </select>
+
+            <select
+              value={filters.origin}
+              onChange={(e) =>
+                onFiltersChange({ ...filters, origin: e.target.value as SessionOrigin | "all" })
+              }
+              className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-1 text-[11px] text-[var(--text-secondary)] outline-none"
+            >
+              <option value="all">{t("allSources")}</option>
+              <option value="web">{t("originWeb")}</option>
+              <option value="cli">{t("originCli")}</option>
+              <option value="tmux">{t("originTmux")}</option>
+              <option value="ide">{t("originIde")}</option>
+              <option value="opencode_server">{t("originOpencode")}</option>
+            </select>
+          </div>
 
           <select
             value={filters.cwd}
             onChange={(e) => onFiltersChange({ ...filters, cwd: e.target.value })}
-            className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-1 text-[11px] text-[var(--text-secondary)] outline-none"
+            className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-2 py-1 text-[11px] text-[var(--text-secondary)] outline-none"
           >
             <option value="">{t("allProjects")}</option>
             {availableCwds.map((dir) => (
@@ -371,7 +391,7 @@ export default function SessionSidebar({
           </div>
           {activeSessions.length === 0 ? (
             <p className="px-2 py-3 text-xs text-[var(--text-muted)]">
-              {filters.q || filters.origin !== "all" || filters.cwd
+              {filters.q || filters.origin !== "all" || filters.harness !== "all" || filters.cwd
                 ? t("noSessionsMatch")
                 : t("noActiveSessions")}
             </p>

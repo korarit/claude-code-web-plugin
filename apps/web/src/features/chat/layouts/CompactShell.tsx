@@ -3,6 +3,7 @@ import type { SessionInfo } from "@contracts/chat";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 import type { UsageState } from "../hooks/useChat.ts";
 import ContextBar from "../components/ContextBar.tsx";
+import HarnessBadge from "../components/HarnessBadge.tsx";
 import SoundToggle from "../components/SoundToggle.tsx";
 import ThemeSwitcher from "../components/ThemeSwitcher.tsx";
 
@@ -68,6 +69,11 @@ export default function CompactShell({
           <span className="truncate text-xs font-semibold text-[var(--text-primary)]">
             {activeSession?.title || activeSession?.lastMessagePreview || t("appName")}
           </span>
+          {activeSession && (
+            <span className="hidden shrink-0 sm:inline-flex">
+              <HarnessBadge harnessId={activeSession.harnessId} compact />
+            </span>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">

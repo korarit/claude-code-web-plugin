@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentNode } from "@contracts/agents";
 import type { SessionInfo, SessionOrigin } from "@contracts/chat";
+import type { HarnessId } from "@contracts/harness";
 import {
   deleteSession,
   fetchSessions,
@@ -10,6 +11,7 @@ import {
 
 export interface SessionFilters {
   origin: SessionOrigin | "all";
+  harness: HarnessId | "all";
   cwd: string;
   q: string;
 }
@@ -26,6 +28,7 @@ export function useSessions(options?: {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<SessionFilters>({
     origin: "all",
+    harness: "all",
     cwd: "",
     q: "",
   });
@@ -122,9 +125,10 @@ export function useSessions(options?: {
     const query = filters.q.trim().toLowerCase();
     return sessions.filter((s) => {
       if (filters.origin !== "all" && s.origin !== filters.origin) return false;
+      if (filters.harness !== "all" && (s.harnessId ?? "claude") !== filters.harness) return false;
       if (filters.cwd && s.cwd !== filters.cwd) return false;
       if (query) {
-        const hay = [s.title, s.lastMessagePreview, s.cwd, s.id, s.model]
+        const hay = [s.title, s.lastMessagePreview, s.cwd, s.id, s.model, s.harnessId]
           .filter(Boolean)
           .join(" ")
           .toLowerCase();

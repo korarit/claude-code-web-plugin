@@ -32,6 +32,11 @@ import type {
   RemoveWorktreeResponse,
 } from "@contracts/workspace";
 import type { ApiResponse } from "@contracts/http";
+import type {
+  HarnessDescriptor,
+  HarnessesListResponse,
+  HarnessId,
+} from "@contracts/harness";
 import { safeJsonParse } from "@core/utils";
 
 export interface HealthInfo {
@@ -45,6 +50,7 @@ export interface HealthInfo {
 export interface SessionListQuery {
   archived?: boolean | "all";
   origin?: SessionOrigin | "all";
+  harness?: HarnessId | "all";
   cwd?: string;
   q?: string;
 }
@@ -62,6 +68,12 @@ export async function fetchHealth(): Promise<HealthInfo> {
   return parseApiJson<HealthInfo>(res);
 }
 
+export async function fetchHarnesses(): Promise<HarnessDescriptor[]> {
+  const res = await fetch("/api/harnesses");
+  const data = await parseApiJson<HarnessesListResponse>(res);
+  return data.harnesses;
+}
+
 export async function fetchModels(): Promise<ModelId[]> {
   const res = await fetch("/api/models");
   const data = await parseApiJson<{ models: ModelId[] }>(res);
@@ -72,6 +84,7 @@ export async function fetchSessions(query: SessionListQuery = {}): Promise<Sessi
   const params = new URLSearchParams();
   if (query.archived !== undefined) params.set("archived", String(query.archived));
   if (query.origin && query.origin !== "all") params.set("origin", query.origin);
+  if (query.harness && query.harness !== "all") params.set("harness", query.harness);
   if (query.cwd) params.set("cwd", query.cwd);
   if (query.q) params.set("q", query.q);
   const qs = params.toString();

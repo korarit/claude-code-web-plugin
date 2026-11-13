@@ -3,6 +3,7 @@ import type { SessionInfo } from "@contracts/chat";
 import { useTranslation } from "../../../lib/i18n/index.ts";
 import type { UsageState } from "../hooks/useChat.ts";
 import ContextBar from "../components/ContextBar.tsx";
+import HarnessBadge from "../components/HarnessBadge.tsx";
 import SoundToggle from "../components/SoundToggle.tsx";
 import ThemeSwitcher from "../components/ThemeSwitcher.tsx";
 
@@ -146,9 +147,12 @@ export default function DesktopShell({
                   )}
                 </div>
               )}
-              <span className="shrink-0 rounded bg-[var(--bg-elevated)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-muted)]">
-                {activeSession.harnessId} · {activeSession.model}
-              </span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <HarnessBadge harnessId={activeSession.harnessId} compact />
+                <span className="rounded bg-[var(--bg-elevated)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-muted)]">
+                  {activeSession.model}
+                </span>
+              </div>
             </>
           )}
         </div>
