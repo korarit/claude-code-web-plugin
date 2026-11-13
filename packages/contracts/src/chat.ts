@@ -1,11 +1,12 @@
 import type { AgentNode, TeamTaskItem } from "./agents.ts";
 import type { SessionFileChange } from "./changes.ts";
+import type { HarnessId } from "./harness.ts";
 
-export type ModelId = "sonnet" | "opus" | "haiku";
+export type { HarnessId } from "./harness.ts";
 
-export const AVAILABLE_MODELS: readonly ModelId[] = ["sonnet", "opus", "haiku"];
+export type ModelId = string;
 
-export type HarnessId = "claude" | "agy" | "opencode";
+export const AVAILABLE_MODELS: readonly string[] = ["sonnet", "opus", "haiku"];
 
 export type SessionStatus = "idle" | "running" | "waiting_permission" | "stopped";
 
@@ -55,6 +56,7 @@ export type PendingInteraction =
 export interface ChatSendRequest {
   prompt: string;
   sessionId?: string;
+  harnessId?: HarnessId;
   model?: ModelId;
   cwd?: string;
   authMode?: AuthMode;

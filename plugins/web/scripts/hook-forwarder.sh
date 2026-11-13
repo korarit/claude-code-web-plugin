@@ -53,6 +53,9 @@ fi
 if [[ -n "${CLAUDE_WEB_SESSION_ID:-}" ]]; then
   HEADERS+=(-H "X-Claude-Web-Session-Id: ${CLAUDE_WEB_SESSION_ID}")
 fi
+if [[ -n "${AGY_WEB_SESSION_ID:-}" ]]; then
+  HEADERS+=(-H "X-Agy-Web-Session-Id: ${AGY_WEB_SESSION_ID}" -H "X-Harness-Id: agy")
+fi
 if [[ -n "${TMUX_PANE:-}" ]] && command -v tmux >/dev/null 2>&1; then
   TMUX_NAME="$(tmux display-message -p -t "${TMUX_PANE}" '#{session_name}' 2>/dev/null || true)"
   if [[ -n "$TMUX_NAME" ]]; then
@@ -60,7 +63,7 @@ if [[ -n "${TMUX_PANE:-}" ]] && command -v tmux >/dev/null 2>&1; then
   fi
 fi
 
-if [[ "$EVENT_NAME" == "PermissionRequest" ]]; then
+if [[ "$EVENT_NAME" == "PermissionRequest" ]] || [[ "$EVENT_NAME" == "PreToolUse" && "${HARNESS_WAIT_PRETOOLUSE:-0}" == "1" ]]; then
   HEADERS+=(-H "X-Harness-Wait-Decision: 1")
   RESPONSE="$(curl -sS --connect-timeout 0.15 -m 60 -X POST \
     "http://127.0.0.1:${PORT}/api/chat/hooks" \
