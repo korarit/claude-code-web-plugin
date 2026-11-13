@@ -56,6 +56,24 @@ export interface PreparedSyncPayload {
   largeContextWarning: boolean;
   importedExternalSessionId?: string;
   suggestedTmuxSessionName?: string;
+  hasTargetBindingSession?: boolean;
+}
+
+const OPENCODE_PART_DELTA_ID_RE = /^(.+)-(\d+)$/;
+
+function parseOpenCodePartDelta(
+  harnessId: HarnessId,
+  event: RawNormalizableEvent,
+): { partId: string; offset: number } | null {
+  if (harnessId !== "opencode" || event.type !== "delta" || !event.id || !event.text) {
+    return null;
+  }
+  if (event.agentId && event.agentId !== "main") return null;
+  const match = OPENCODE_PART_DELTA_ID_RE.exec(event.id);
+  if (!match) return null;
+  const offset = Number(match[2]);
+  if (!Number.isFinite(offset) || offset < 0) return null;
+  return { partId: match[1]!, offset };
 }
 
 export class CanonicalSyncService {
@@ -168,6 +186,31 @@ export class CanonicalSyncService {
     const cleanUserText =
       event.type === "user" && event.text ? stripInjectedSyncPreamble(event.text) : undefined;
 
+    // OpenCode streams incremental delta chunks with `<partId>-<offset>` ids; merge into one canonical row.
+    const ocPart = parseOpenCodePartDelta(session.harnessId, event);
+    if (ocPart && event.text) {
+      const { event: stored, inserted } = this.repo.upsertStreamingDelta({
+        canonicalSessionId: canonical.canonicalSessionId,
+        sourceKey: `opencode:part:${ocPart.partId}`,
+        id: event.id ?? `ce-oc-${ocPart.partId}`,
+        harnessId: "opencode",
+        model: event.model ?? session.model,
+        text: event.text,
+        offset: ocPart.offset,
+        ts,
+      });
+      const binding = getOrInitBinding(canonical, "opencode");
+      if (stored.seq > binding.lastSyncedSeq) {
+        this.repo.upsertBinding(canonical.canonicalSessionId, {
+          ...binding,
+          lastSyncedSeq: stored.seq,
+          lastSyncedAt: ts,
+          model: stored.model ?? binding.model,
+        });
+      }
+      return { event: stored, inserted, cleanUserText };
+    }
+
     const normalized = normalizeEventToCanonical({
       canonicalSessionId: canonical.canonicalSessionId,
       harnessId: session.harnessId,
@@ -191,6 +234,13 @@ export class CanonicalSyncService {
         lastNonSwitch.text?.trim() === normalized.text.trim() &&
         lastNonSwitch.harnessId === normalized.harnessId
       ) {
+        if (!lastNonSwitch.sourceKey && normalized.sourceKey) {
+          this.repo.attachSourceKey(
+            canonical.canonicalSessionId,
+            lastNonSwitch.seq,
+            normalized.sourceKey,
+          );
+        }
         return { event: lastNonSwitch, inserted: false, cleanUserText };
       }
     }
@@ -218,35 +268,70 @@ export class CanonicalSyncService {
     const canonical = this.ensureSession(session);
     let insertedCount = 0;
 
+    // Index existing unkeyed web user prompts chronologically so re-ingesting disk history never duplicates them.
+    const existingEvents = this.repo.listEvents(canonical.canonicalSessionId);
+    const knownSourceKeys = new Set(
+      existingEvents.map((e) => e.sourceKey).filter((k): k is string => Boolean(k)),
+    );
+    const unkeyedUserQueue = new Map<string, number[]>();
+    for (const existingEv of existingEvents) {
+      if (!existingEv.sourceKey && existingEv.role === "user" && existingEv.text) {
+        const key = `${existingEv.harnessId}\0${existingEv.text.trim()}`;
+        const list = unkeyedUserQueue.get(key) ?? [];
+        list.push(existingEv.seq);
+        unkeyedUserQueue.set(key, list);
+      }
+    }
+
     for (let i = 0; i < events.length; i++) {
       const ev = events[i]!;
+      const ts = ev.timestamp ?? isoNow(this.clock);
+      const ocPart = parseOpenCodePartDelta(session.harnessId, ev);
+      if (ocPart && ev.text) {
+        const res = this.repo.upsertStreamingDelta({
+          canonicalSessionId: canonical.canonicalSessionId,
+          sourceKey: `opencode:part:${ocPart.partId}`,
+          id: ev.id ?? `ce-oc-${ocPart.partId}`,
+          harnessId: "opencode",
+          model: ev.model ?? session.model,
+          text: ev.text,
+          offset: ocPart.offset,
+          ts,
+        });
+        if (res.inserted) insertedCount++;
+        continue;
+      }
+
       const normalized = normalizeEventToCanonical({
         canonicalSessionId: canonical.canonicalSessionId,
         harnessId: session.harnessId,
         fallbackModel: session.model,
         event: ev,
-        fallbackTs: ev.timestamp ?? isoNow(this.clock),
+        fallbackTs: ts,
         fallbackKey: ev.id ?? `hist-${i}`,
       });
       if (!normalized) continue;
 
+      if (normalized.sourceKey && knownSourceKeys.has(normalized.sourceKey)) {
+        continue;
+      }
+
       if (normalized.role === "user" && normalized.text) {
-        const recent = this.repo.listEvents(canonical.canonicalSessionId, { limit: 6 });
-        const lastNonSwitch = [...recent]
-          .reverse()
-          .find((e) => e.kind !== "harness_switched");
-        if (
-          lastNonSwitch &&
-          lastNonSwitch.role === "user" &&
-          lastNonSwitch.text?.trim() === normalized.text.trim() &&
-          lastNonSwitch.harnessId === normalized.harnessId
-        ) {
+        const queueKey = `${normalized.harnessId}\0${normalized.text.trim()}`;
+        const matchedSeqs = unkeyedUserQueue.get(queueKey);
+        if (matchedSeqs && matchedSeqs.length > 0) {
+          const matchedSeq = matchedSeqs.shift()!;
+          if (normalized.sourceKey) {
+            this.repo.attachSourceKey(canonical.canonicalSessionId, matchedSeq, normalized.sourceKey);
+            knownSourceKeys.add(normalized.sourceKey);
+          }
           continue;
         }
       }
 
       const res = this.repo.appendEvent(normalized);
       if (res.inserted) insertedCount++;
+      if (normalized.sourceKey) knownSourceKeys.add(normalized.sourceKey);
     }
 
     const latestSeq = this.repo.getLatestSeq(canonical.canonicalSessionId);
@@ -289,6 +374,10 @@ export class CanonicalSyncService {
       }
     }
 
+    const hasExistingBindingSession = Boolean(
+      targetBinding.externalSessionId || targetBinding.transcriptPath || targetBinding.tmuxSession,
+    );
+
     if (delta.length === 0) {
       return {
         canonicalSessionId: canonical.canonicalSessionId,
@@ -298,6 +387,7 @@ export class CanonicalSyncService {
         deltaCount: 0,
         largeContextWarning: false,
         suggestedTmuxSessionName,
+        hasTargetBindingSession: hasExistingBindingSession,
       };
     }
 
@@ -331,6 +421,7 @@ export class CanonicalSyncService {
           largeContextWarning: false,
           importedExternalSessionId: imported.externalSessionId,
           suggestedTmuxSessionName,
+          hasTargetBindingSession: true,
         };
       }
     }
@@ -372,6 +463,7 @@ export class CanonicalSyncService {
         syncFilePath,
         largeContextWarning: true,
         suggestedTmuxSessionName,
+        hasTargetBindingSession: hasExistingBindingSession,
       };
     }
 
@@ -391,6 +483,7 @@ export class CanonicalSyncService {
       strategy: "direct_verbatim",
       largeContextWarning: false,
       suggestedTmuxSessionName,
+      hasTargetBindingSession: hasExistingBindingSession,
     };
   }
 
@@ -536,6 +629,14 @@ export class CanonicalSyncService {
   getBinding(sessionId: string, harnessId: HarnessId): HarnessBinding | undefined {
     const session = this.repo.get(sessionId);
     return session?.bindings[harnessId];
+  }
+
+  findSessionIdByBinding(params: {
+    harnessId?: HarnessId;
+    externalSessionId?: string;
+    transcriptPath?: string;
+  }): string | null {
+    return this.repo.findByBinding(params)?.canonicalSessionId ?? null;
   }
 
   deleteSession(sessionId: string): void {

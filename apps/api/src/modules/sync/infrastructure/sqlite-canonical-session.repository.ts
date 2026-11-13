@@ -17,7 +17,11 @@ import type {
   CanonicalSession,
   HarnessBinding,
 } from "../domain/canonical-session.entity.ts";
-import type { CanonicalSessionRepository } from "../domain/canonical-session.repository.port.ts";
+import type {
+  CanonicalSessionRepository,
+  BindingLookupParams,
+  UpsertStreamingDeltaInput,
+} from "../domain/canonical-session.repository.port.ts";
 
 interface SessionRow {
   id: string;
@@ -193,6 +197,9 @@ export class SqliteCanonicalSessionRepository implements CanonicalSessionReposit
 
       CREATE INDEX IF NOT EXISTS idx_canonical_bindings_external
         ON canonical_bindings(harness_id, external_session_id);
+
+      CREATE INDEX IF NOT EXISTS idx_canonical_bindings_transcript
+        ON canonical_bindings(transcript_path);
     `);
   }
 
@@ -240,6 +247,48 @@ export class SqliteCanonicalSessionRepository implements CanonicalSessionReposit
       .get(harnessId, externalSessionId) as { canonical_session_id: string } | null;
     if (!row) return null;
     return this.get(row.canonical_session_id);
+  }
+
+  findByBinding(params: BindingLookupParams): CanonicalSession | null {
+    if (params.externalSessionId) {
+      const byExt = params.harnessId
+        ? (this.db
+            .query(
+              `SELECT canonical_session_id FROM canonical_bindings
+               WHERE harness_id = ? AND external_session_id = ?
+               LIMIT 1`,
+            )
+            .get(params.harnessId, params.externalSessionId) as { canonical_session_id: string } | null)
+        : (this.db
+            .query(
+              `SELECT canonical_session_id FROM canonical_bindings
+               WHERE external_session_id = ?
+               LIMIT 1`,
+            )
+            .get(params.externalSessionId) as { canonical_session_id: string } | null);
+      if (byExt) return this.get(byExt.canonical_session_id);
+    }
+
+    if (params.transcriptPath) {
+      const byPath = params.harnessId
+        ? (this.db
+            .query(
+              `SELECT canonical_session_id FROM canonical_bindings
+               WHERE harness_id = ? AND transcript_path = ?
+               LIMIT 1`,
+            )
+            .get(params.harnessId, params.transcriptPath) as { canonical_session_id: string } | null)
+        : (this.db
+            .query(
+              `SELECT canonical_session_id FROM canonical_bindings
+               WHERE transcript_path = ?
+               LIMIT 1`,
+            )
+            .get(params.transcriptPath) as { canonical_session_id: string } | null);
+      if (byPath) return this.get(byPath.canonical_session_id);
+    }
+
+    return null;
   }
 
   saveSession(session: CanonicalSession): void {
@@ -387,6 +436,78 @@ export class SqliteCanonicalSessionRepository implements CanonicalSessionReposit
     });
 
     return tx();
+  }
+
+  upsertStreamingDelta(input: UpsertStreamingDeltaInput): { event: CanonicalEvent; inserted: boolean } {
+    const tx = this.db.transaction((): { event: CanonicalEvent; inserted: boolean } => {
+      const existing = this.db
+        .query(
+          `SELECT * FROM canonical_events
+           WHERE canonical_session_id = ? AND source_key = ?
+           LIMIT 1`,
+        )
+        .get(input.canonicalSessionId, input.sourceKey) as EventRow | null;
+
+      if (!existing) {
+        return this.appendEvent({
+          canonicalSessionId: input.canonicalSessionId,
+          id: input.id,
+          sourceKey: input.sourceKey,
+          harnessId: input.harnessId,
+          model: input.model,
+          role: "assistant",
+          kind: "message",
+          text: input.text,
+          ts: input.ts,
+        });
+      }
+
+      const prevText = existing.text ?? "";
+      let nextText: string | null = null;
+      if (input.offset === 0) {
+        if (input.text.length > prevText.length) {
+          nextText = input.text;
+        }
+      } else if (prevText.length === input.offset) {
+        nextText = prevText + input.text;
+      } else if (prevText.length >= input.offset && prevText.length < input.offset + input.text.length) {
+        nextText = prevText + input.text.slice(prevText.length - input.offset);
+      }
+
+      if (nextText === null) {
+        return { event: toCanonicalEvent(existing), inserted: false };
+      }
+
+      this.db
+        .query(
+          `UPDATE canonical_events
+           SET text = ?, model = COALESCE(?, model), ts = ?
+           WHERE canonical_session_id = ? AND seq = ?`,
+        )
+        .run(nextText, input.model ?? null, input.ts, input.canonicalSessionId, existing.seq);
+
+      const updated = this.db
+        .query(`SELECT * FROM canonical_events WHERE canonical_session_id = ? AND seq = ?`)
+        .get(input.canonicalSessionId, existing.seq) as EventRow;
+
+      return { event: toCanonicalEvent(updated), inserted: false };
+    });
+
+    return tx();
+  }
+
+  attachSourceKey(canonicalSessionId: string, seq: number, sourceKey: string): void {
+    try {
+      this.db
+        .query(
+          `UPDATE canonical_events
+           SET source_key = ?
+           WHERE canonical_session_id = ? AND seq = ? AND source_key IS NULL`,
+        )
+        .run(sourceKey, canonicalSessionId, seq);
+    } catch {
+      // Ignore if another row already claimed the same source_key.
+    }
   }
 
   listEvents(
