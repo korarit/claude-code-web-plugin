@@ -38,17 +38,20 @@
 ### 3.1 `packages/contracts/src/chat.ts`
 - เพิ่ม `SessionStatus = "idle" | "running" | "waiting_permission" | "stopped"`
 - ขยาย `SessionInfo`:
+  - `title?: string` (ชื่อที่ผู้ใช้ตั้งเอง; fallback เป็น preview ข้อความแรก)
   - `status: SessionStatus`
   - `tmuxSession?: string`
   - `transcriptPath?: string`
   - `cwd?: string`
+  - `archivedAt?: string | null`
+- เพิ่ม `SessionUpdateRequest`: `{ title?: string; archived?: boolean }`
 - ขยาย `ChatEventType` เพิ่ม `"status"` และ `"permission_prompt"` (optional payload สำหรับแจ้งว่ากำลังรอ input)
 - คงกฎ pure TypeScript zero external dependency
 
 ### 3.2 `apps/api/src/modules/chat/domain/`
-- `session.entity.ts`: เพิ่ม state transition methods (`markRunning()`, `markIdle()`, `markWaitingPermission()`, `attachTranscript(path)`)
+- `session.entity.ts`: เพิ่ม state transition methods (`markRunning()`, `markIdle()`, `markWaitingPermission()`, `attachTranscript(path)`, `rename(title)`, `archive()`, `unarchive()`)
 - `chat.events.ts`: เพิ่ม `DomainStatusEvent`, `DomainHookEvent`
-- `repository.port.ts`: เพิ่ม `findByTmuxSession(name)` และ `findByTranscriptPath(path)`
+- `repository.port.ts`: เพิ่ม `findByTmuxSession(name)`, `findByTranscriptPath(path)`, `delete(id)`
 - `errors.ts`: เพิ่ม `TmuxNotAvailableError`, `SessionNotRunningError`
 
 ### 3.3 `apps/api/src/modules/chat/application/`
@@ -82,10 +85,11 @@
 
 ### 3.5 `apps/api/src/modules/chat/presentation/chat.routes.ts`
 - `POST /api/chat/send` → สร้าง/ใช้ session เดิม ส่ง prompt เข้า `tmux` แล้วคืน `{ session }` (202 / 200)
+- `PATCH /api/chat/sessions/:id` → rename (`title`) หรือ archive / unarchive (`archived: boolean`, ถ้า archive ให้หยุด/detach หรือคงประวัติไว้เปิดดูได้)
 - `POST /api/chat/sessions/:id/abort` → ส่ง `Ctrl+C` หยุดงานที่กำลังรันอยู่กลางคัน
-- `DELETE /api/chat/sessions/:id` → ปิด `tmux` session และลบ/mark stopped
-- `GET /api/chat/sessions` → list sessions พร้อม `status` ล่าสุด (`idle` / `running` / `waiting_permission` / `stopped`)
-- `GET /api/chat/sessions/events` → global SSE stream สำหรับ Session Sidebar (อัปเดตสถานะ `running` / `idle` / `waiting_permission` ของทุก session แบบ real-time แม้ไม่ได้เปิดห้องนั้นอยู่)
+- `DELETE /api/chat/sessions/:id` → **ลบถาวร**: kill `tmux` session (ถ้ายังรันอยู่), ลบออกจาก `~/.harness-web/sessions.json` และลบ cache/snapshots ของ session นั้นออกทั้งหมด
+- `GET /api/chat/sessions?archived=false|true|all` → list sessions พร้อม `status` ล่าสุด (`idle` / `running` / `waiting_permission` / `stopped`)
+- `GET /api/chat/sessions/events` → global SSE stream สำหรับ Session Sidebar (อัปเดตสถานะ `running` / `idle` / `waiting_permission` รวมถึง event rename/archive/delete แบบ real-time)
 - `GET /api/chat/sessions/:id/events` → SSE stream ต่อ `sessionId` (replay recent events จาก `.jsonl` + stream real-time ต่อ)
 - `POST /api/chat/hooks` → รับ JSON payload จาก `hook-forwarder.sh`
 
@@ -94,10 +98,11 @@
 - `hooks/hooks.json` (หรือ config snippet ใน plugin): ลงทะเบียน hooks ที่จำเป็น
 
 ### 3.7 `apps/web/src/features/chat/`
-- `api.ts`: เพิ่ม `subscribeSessionEvents`, `subscribeSessionsListEvents`, `abortSession`, `deleteSession`
+- `api.ts`: เพิ่ม `subscribeSessionEvents`, `subscribeSessionsListEvents`, `updateSession`, `abortSession`, `deleteSession`
 - `hooks/useChat.ts` + `hooks/useSessions.ts`: แยก action `send()` ออกจาก subscription stream ของ session; sync รายการ session และสถานะแบบ real-time; เมื่อเปิดเว็บใหม่หรือรีเฟรชหน้า ยังโหลดประวัติ + ตาม stream ต่อได้
 - `components/SessionSidebar.tsx`:
-  - แสดงรายการ sessions ทั้งหมดที่เปิดอยู่ (ชื่อ/preview ข้อความแรก, `model` badge, เวลาอัปเดตล่าสุด) และปุ่ม `+ New Session` + ปุ่มปิด/ลบ session
+  - แสดงรายการ sessions ทั้งหมดที่เปิดอยู่ (ชื่อที่ตั้งเอง/preview ข้อความแรก, `model` badge, เวลาอัปเดตล่าสุด) และปุ่ม `+ New Session`
+  - **Session Actions:** กด **Rename** (inline edit), **Archive / Unarchive** (ส่วน `Archived` พับเก็บได้ด้านล่าง), และ **Delete Permanently** (พร้อม confirm modal กันกดพลาด)
   - **Live Status Indicator:** ถ้า session ไหนกำลังทำงาน (`status === "running"`) ให้แสดง **loading spinner icon** หมุนอยู่ข้างชื่อ session (แม้กำลังเปิดดู session อื่นอยู่), และแสดง badge แจ้งเตือนเมื่อ `status === "waiting_permission"`
   - คลิกสลับดู session ใดก็ได้โดยไม่ขัดจังหวะ session อื่นที่กำลังทำงานใน background
 - `components/ChatView.tsx`: จัด layout แบบ Sidebar + Main Chat Area, แสดงสถานะ session, ปุ่ม **Stop/Abort** ตอนกำลังรัน, Markdown + code copy rendering, และ collapsible tool call blocks (`Read`, `Edit`, `Bash`)
@@ -118,6 +123,6 @@
 3. Smoke test:
    - เปิด server → `POST /api/chat/hooks` ด้วย mock payload → SSE `/api/chat/sessions/:id/events` และ `/api/chat/sessions/events` ได้รับ event ทันที
    - ทดสอบกับ `tmux` session จริง: ส่งข้อความจากเว็บ → เห็นข้อความเข้า terminal → เห็นคำตอบไหลกลับหน้าเว็บ real-time → restart API server แล้วโหลด `~/.harness-web/sessions.json` กลับมาเฝ้าต่อได้
-   - ทดสอบ Abort & Delete: กด Stop (`POST /api/chat/sessions/:id/abort`) แล้วส่ง `Ctrl+C` เข้า `tmux` หยุดงานได้ และลบ session ปิด `tmux` process ได้สะอาด
+   - ทดสอบ Abort, Rename, Archive & Permanent Delete: กด Stop (`Ctrl+C`) หยุดงานได้, Rename แล้วชื่อจำอยู่หลัง restart, Archive ย้ายไปส่วน Archived และ unarchive กลับมาได้, และ Delete ถาวรปิด `tmux` พร้อมลบออกจาก `sessions.json` สะอาด
    - ทดสอบเปิด 2 sessions พร้อมกัน: สั่งงาน Session A แล้วกดสลับไปดู Session B → **Session Sidebar** แสดง **loading icon** บน Session A จนกว่าจะทำงานเสร็จ (`Stop` hook → `idle`)
 4. `hook-forwarder.sh` เมื่อ server ปิดอยู่ต้องจบด้วย exit code `0` ภายใน `< 200ms`

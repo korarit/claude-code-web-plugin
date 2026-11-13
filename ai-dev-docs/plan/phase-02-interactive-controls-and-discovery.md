@@ -58,6 +58,13 @@
 - **Image / Screenshot Paste Input:**
   - `POST /api/chat/upload` (หรือ paste รูปจาก clipboard บนเว็บ) บันทึกรูปลง temp file ใน workspace/cache แล้วแนบ path เข้า prompt ของ CLI (`tmux`) ให้ agent อ่านภาพได้
 
+### 2.6 Sound Notifications (Toggleable / Mute)
+- **เสียงเตือนในเว็บ (`apps/web` — Web Audio API, ไม่ต้องพึ่งไฟล์เสียงภายนอก):**
+  - เล่นเสียงเตือนสั้นๆ ที่แยกโทนต่างกันเมื่อ:
+    - Session ใดๆ เข้าสถานะ `waiting_permission` / `question` (รอผู้ใช้ตัดสินใจ)
+    - Session ที่รันอยู่ข้างหลังทำงานเสร็จ (`running -> idle`) หรือเกิด `error`
+  - **ปุ่มปิด/เปิดเสียง (Mute Toggle):** ปุ่มลำโพงบน Header / Sidebar เก็บค่า preference ลง `localStorage` (ปิดเสียงได้ทันทีตลอดเวลา และไม่ส่งเสียงซ้ำหากผู้ใช้อยู่ในห้องที่กำลังดูอยู่แล้ว)
+
 ## 3. Exit Criteria / Verification
 
 1. เมื่อ `claude` ติด permission prompt, `PermissionRequest` hook hold รอคำตัดสินจากหน้าเว็บ → กด Allow/Deny แล้วทำงานต่อได้โดยไม่ค้าง (และหากเว็บไม่เปิดอยู่ hook ต้อง fallback กลับสู่ TUI ภายใน timeout)
@@ -65,3 +72,4 @@
 3. เปิด `claude` ใน terminal ภายนอก → หน้าเว็บมองเห็น session ใน list และโหลดประวัติจาก `.jsonl` ได้ถูกต้อง
 4. กด Resume session เก่าจากประวัติ `.jsonl` แล้วเปิด `tmux` ต่อบทสนทนาเดิมได้
 5. สามารถสลับสร้าง session แบบเลือก `cwd` ต่างกัน, ระบุ `agentProfile`, สั่ง `/model` หรือ `/compact` กลาง session, และใช้ `ANTHROPIC_API_KEY` (isolated env ใน `tmux new-session -e`) โดยไม่กระทบ global CLI login ของเครื่อง
+6. ทดสอบ Sound Notification: เปิดเสียงแล้วมี session ข้างหลังเสร็จหรือรอ permission → มีเสียงเตือน; กด Mute → เงียบสนิทและจำค่าไว้หลังรีเฟรชหน้า
